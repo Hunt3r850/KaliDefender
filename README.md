@@ -54,7 +54,7 @@ Optimizado para **ThinkPad X13**, pero compatible con cualquier Kali Linux.
 ### Instalación Rápida
 
 ```bash
-git clone https://github.com/tu-usuario/KaliDefender.git
+git clone https://github.com/Hunt3r850/KaliDefender.git
 cd KaliDefender
 chmod +x kalidefender.sh
 sudo ./kalidefender.sh install
@@ -325,10 +325,10 @@ Este proyecto está licenciado bajo la Licencia MIT. Ver el archivo [LICENSE](LI
 
 ## 👤 Autor
 
-**Tu Nombre**
+Lic. Ahmed Alfonso
 
-- GitHub: [@tu-usuario](https://github.com/tu-usuario)
-- Email: tu-email@ejemplo.com
+- GitHub: [@Hunt3r850](https://github.com/Hunt3r850)
+- Email: aalfonso850@yahoo.com
 
 ---
 
@@ -353,7 +353,7 @@ Este proyecto está licenciado bajo la Licencia MIT. Ver el archivo [LICENSE](LI
 
 ---
 
-> 💡 **¿Problemas o sugerencias?** Abre un [issue](https://github.com/tu-usuario/KaliDefender/issues) o consulta los logs en `/var/log/kalidefender.log`
+> 💡 **¿Problemas o sugerencias?** Abre un [issue](https://github.com/Hunt3r850/KaliDefender/issues) o consulta los logs en `/var/log/kalidefender.log`
 
 ---
 
