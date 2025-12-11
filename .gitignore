@@ -1,0 +1,32 @@
+# Logs
+*.log
+/var/log/kalidefender.log
+
+# Archivos temporales
+*.tmp
+*~
+*.swp
+*.swo
+.DS_Store
+
+# Binarios locales
+kalidefender
+
+# Documentos generados
+docs/*.pdf
+
+# Configuraciones locales
+*.local
+.env
+
+# Backups
+*.bak
+*.backup
+
+# IDE
+.vscode/
+.idea/
+*.sublime-*
+
+# Sistema
+Thumbs.db
