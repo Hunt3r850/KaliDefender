@@ -1,6 +1,6 @@
 #!/bin/bash
 # KaliDefender v4.2 - Sistema Dual Stealth/Attack para Pentesters Profesionales
-# Autor: Tu Nombre
+# Autor: Hunt3r850
 # Licencia: MIT
 
 set -euo pipefail
@@ -37,36 +37,40 @@ get_user_uid() {
 install_apparmor_metasploit() {
     log "🛡️ Instalando perfiles de AppArmor para Metasploit..."
 
-    cat > /etc/apparmor.d/usr.bin.msfconsole <<-'EOF'
-    #include <tunables/global>
+    cat > /etc/apparmor.d/usr.bin.msfconsole <<'EOF'
+#include <tunables/global>
 
-    profile msfconsole /usr/bin/msfconsole {
-      #include <abstractions/base>
-      #include <abstractions/nameservice>
-      #include <abstractions/ruby>
+profile msfconsole /usr/bin/msfconsole {
+  #include <abstractions/base>
+  #include <abstractions/nameservice>
+  #include <abstractions/ruby>
 
-      # Permite acceso a los recursos de Metasploit
-      /usr/share/metasploit-framework/** r,
-      /opt/metasploit-framework/** r,
+  # Permite acceso a los recursos de Metasploit
+  /usr/share/metasploit-framework/** r,
+  /opt/metasploit-framework/** r,
 
-      # Permite acceso a archivos de usuario
-      owner @{HOME}/.msf4/** rw,
+  # Permite acceso a archivos de usuario
+  owner @{HOME}/.msf4/** rw,
 
-      # Niega acceso a archivos críticos
-      deny /etc/shadow r,
-      deny /etc/sudoers r,
-      deny /root/** r,
-      deny @{HOME}/.ssh/id_rsa r,
+  # Niega acceso a archivos críticos
+  deny /etc/shadow r,
+  deny /etc/sudoers r,
+  deny /root/** r,
+  deny @{HOME}/.ssh/id_rsa r,
 
-      # Permite operaciones de red
-      network inet stream,
-      network inet dgram,
-      network raw,
-    }
-    EOF
+  # Permite operaciones de red
+  network inet stream,
+  network inet dgram,
+  network raw,
+}
+EOF
 
-    apparmor_parser -r /etc/apparmor.d/usr.bin.msfconsole
-    log "✅ Perfil de AppArmor para msfconsole instalado."
+    if command -v apparmor_parser &>/dev/null; then
+        apparmor_parser -r /etc/apparmor.d/usr.bin.msfconsole
+        log "✅ Perfil de AppArmor para msfconsole instalado."
+    else
+        log "⚠️ AppArmor no detectado, perfil guardado pero no cargado."
+    fi
 }
 
 # ==================== RED C2 ====================
@@ -80,7 +84,7 @@ detect_c2_subnet() {
         log "🔎 Red C2 detectada: Tailscale ($C2_SUBNET)"
     elif command -v zerotier-cli &>/dev/null && zerotier-cli info -j | grep -q '\"status\":\"OK\"' ; then
         C2_PROVIDER="zerotier"
-        C2_SUBNET=$(zerotier-cli listnetworks -j | grep -o '[0-9]\\+\.[0-9]\\+\.[0-9]\\+\.[0-9]\\+/[0-9]\\+' | head -n1)
+        C2_SUBNET=$(zerotier-cli listnetworks -j | grep -o '[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}/[0-9]\{1,2\}' | head -n1)
         log "🔎 Red C2 detectada: ZeroTier ($C2_SUBNET)"
     else
         log "ℹ️ Sin red C2 privada. Los puertos de ataque serán públicos."
@@ -143,10 +147,12 @@ mode_stealth() {
     # Configurar DNS y hacerlo inmutable
     chattr -i /etc/resolv.conf 2>/dev/null || true
     echo "nameserver 127.0.0.1" > /etc/resolv.conf
-    chattr +i /etc/resolv.conf
+    chattr +i /etc/resolv.conf 2>/dev/null || true
 
     echo "stealth" > "$MODE_FILE"
-    iptables-save > /etc/iptables/rules.stealth.v4
+    if [[ -d /etc/iptables ]]; then
+        iptables-save > /etc/iptables/rules.stealth.v4
+    fi
     log "✅ Modo Stealth activo."
 }
 
@@ -189,7 +195,9 @@ mode_attack() {
     fi
 
     echo "attack" > "$MODE_FILE"
-    iptables-save > /etc/iptables/rules.attack.v4
+    if [[ -d /etc/iptables ]]; then
+        iptables-save > /etc/iptables/rules.attack.v4
+    fi
     log "✅ Modo Attack activo."
 }
 
@@ -197,25 +205,30 @@ mode_attack() {
 
 install_dependencies() {
     log "📦 Instalando dependencias..."
-    apt update -qq
+    apt update -qq || true
     apt install -y -qq iptables-persistent fail2ban tor tor-geoipdb resolvconf macchanger apparmor apparmor-utils curl
 }
 
 configure_tor_dns() {
     log "🧅 Configurando Tor para DNS..."
-    if ! grep -q "DNSPort 5353" /etc/tor/torrc; then
-        cat >> /etc/tor/torrc <<EOF
+    if [[ -f /etc/tor/torrc ]]; then
+        if ! grep -q "DNSPort 5353" /etc/tor/torrc; then
+            cat >> /etc/tor/torrc <<EOF
 
 DNSPort 5353
 AutomapHostsOnResolve 1
 AvoidDiskWrites 1
 EOF
+        fi
+        systemctl restart tor || true
+    else
+        log "⚠️ Archivo /etc/tor/torrc no encontrado. Omitiendo configuración de Tor."
     fi
-    systemctl restart tor
 }
 
 configure_mac_randomization() {
     log "📡 Configurando aleatorización de MAC..."
+    mkdir -p /etc/NetworkManager/conf.d/
     cat > /etc/NetworkManager/conf.d/00-macrandomize.conf <<EOF
 [device]
 wifi.scan-rand-mac-address=yes
@@ -224,26 +237,26 @@ wifi.scan-rand-mac-address=yes
 wifi.cloned-mac-address=random
 ethernet.cloned-mac-address=random
 EOF
-    systemctl restart NetworkManager
+    systemctl restart NetworkManager || true
 }
 
 configure_fail2ban() {
     log "🛡️ Configurando Fail2Ban..."
-    cat > /etc/fail2ban/filter.d/kalidefender.conf <<-'EOF'
-    [Definition]
-    failregex = ^.*KALIDEFENDER-DROP:.*SRC=<HOST>
-    ignoreregex =
-    EOF
+    cat > /etc/fail2ban/filter.d/kalidefender.conf <<'EOF'
+[Definition]
+failregex = ^.*KALIDEFENDER-DROP:.*SRC=<HOST>
+ignoreregex =
+EOF
 
     cat > /etc/fail2ban/jail.d/kalidefender.local <<EOF
-    [kalidefender]
-    enabled = true
-    filter = kalidefender
-    logpath = /var/log/kern.log
-    maxretry = 3
-    bantime = 1h
-    EOF
-    systemctl restart fail2ban
+[kalidefender]
+enabled = true
+filter = kalidefender
+logpath = /var/log/kern.log
+maxretry = 3
+bantime = 1h
+EOF
+    systemctl restart fail2ban || true
 }
 
 install_secure_c2() {
@@ -259,11 +272,11 @@ install_secure_c2() {
 
     case "$c2_choice" in
         t)  log "Instalando Tailscale..."
-            curl -fsSL https://tailscale.com/install.sh | sh
+            curl -fsSL https://tailscale.com/install.sh | sh || true
             echo "📌 ¡Acción requerida! Ejecuta 'sudo tailscale up' para autenticarte."
             ;;
         z)  log "Instalando ZeroTier..."
-            curl -s https://install.zerotier.com | sudo bash
+            curl -s https://install.zerotier.com | sudo bash || true
             read -p "Introduce tu Network ID de ZeroTier: " nid
             zerotier-cli join "$nid" || true
             ;;
@@ -276,7 +289,7 @@ install_all() {
     
     mkdir -p "$CONFIG_DIR"
     touch "$LOG_FILE"
-    chown _apt:adm "$LOG_FILE"
+    chmod 644 "$LOG_FILE"
 
     install_dependencies
     configure_tor_dns
@@ -289,23 +302,23 @@ install_all() {
     cp "$0" /usr/local/bin/kalidefender.sh
     chmod +x /usr/local/bin/kalidefender.sh
 
-    cat > /etc/systemd/system/kalidefender.service <<-'EOF'
-    [Unit]
-    Description=KaliDefender v4.2 - Servicio de Seguridad
-    After=network.target tor.service tailscaled.service zerotier-one.service
-    Wants=tor.service
+    cat > /etc/systemd/system/kalidefender.service <<'EOF'
+[Unit]
+Description=KaliDefender v4.2 - Servicio de Seguridad
+After=network.target tor.service tailscaled.service zerotier-one.service
+Wants=tor.service
 
-    [Service]
-    Type=oneshot
-    ExecStart=/usr/local/bin/kalidefender.sh start
-    RemainAfterExit=yes
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/kalidefender.sh start
+RemainAfterExit=yes
 
-    [Install]
-    WantedBy=multi-user.target
-    EOF
+[Install]
+WantedBy=multi-user.target
+EOF
 
-    systemctl daemon-reload
-    systemctl enable kalidefender.service
+    systemctl daemon-reload || true
+    systemctl enable kalidefender.service || true
 
     # Iniciar en modo Stealth
     mode_stealth
@@ -344,11 +357,11 @@ mode_status() {
 
     echo
     echo "🌐 Red C2 Privada:"
-    if systemctl is-active --quiet tailscaled; then
+    if systemctl is-active --quiet tailscaled 2>/dev/null; then
         echo "  ✅ Tailscale activo - IP: $(tailscale ip -4 2>/dev/null || echo 'N/A')"
-    elif systemctl is-active --quiet zerotier-one; then
+    elif systemctl is-active --quiet zerotier-one 2>/dev/null; then
         local nets
-        nets=$(zerotier-cli listnetworks -j 2>/dev/null | grep -o '[0-9a-f]\\{16\}' || echo "N/A")
+        nets=$(zerotier-cli listnetworks -j 2>/dev/null | grep -o '[0-9a-f]\{16\}' || echo "N/A")
         echo "  ✅ ZeroTier activo - Redes: $nets"
     else
         echo "  ❌ No detectada"
@@ -385,7 +398,7 @@ start_service() {
 # ==================== AYUDA ====================
 
 print_help() {
-    cat <<-'EOF'
+    cat <<'EOF'
     KaliDefender v4.2 — Sistema Dual Stealth/Attack para Pentesters
 
     Uso: sudo kalidefender.sh [COMANDO]
@@ -405,15 +418,14 @@ print_help() {
       4. Vuelve a `stealth` al finalizar el engagement.
 
     Para más detalles, consulta la documentación en GitHub.
-    EOF
+EOF
 }
 
 # ==================== MAIN ====================
 
 main() {
     check_root
-    cd "$(dirname "$0")" # Asegura que se ejecuta en el directorio del script
-
+    
     case "${1:-help}" in
         install)    install_all ;;
         stealth)    mode_stealth ;;

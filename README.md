@@ -344,6 +344,7 @@ Lic. Ahmed Alfonso
 
 ## 📈 Roadmap
 
+- [x] Corrección de errores de sintaxis y robustez de scripts
 - [ ] Soporte para Wireguard nativo
 - [ ] Integración con Cobalt Strike
 - [ ] Perfiles de AppArmor para más herramientas

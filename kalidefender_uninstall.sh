@@ -21,18 +21,22 @@ check_root() {
 
 restore_firewall() {
     log "🔥 Restaurando reglas de firewall..."
-    iptables -F
-    iptables -X
-    iptables -t nat -F
-    iptables -t nat -X
-    iptables -P INPUT ACCEPT
-    iptables -P OUTPUT ACCEPT
-    iptables -P FORWARD ACCEPT
-    ip6tables -F
-    ip6tables -X
-    ip6tables -P INPUT ACCEPT
-    ip6tables -P OUTPUT ACCEPT
-    ip6tables -P FORWARD ACCEPT
+    iptables -F || true
+    iptables -X || true
+    iptables -t nat -F || true
+    iptables -t nat -X || true
+    iptables -P INPUT ACCEPT || true
+    iptables -P OUTPUT ACCEPT || true
+    iptables -P FORWARD ACCEPT || true
+    
+    if command -v ip6tables &>/dev/null; then
+        ip6tables -F || true
+        ip6tables -X || true
+        ip6tables -P INPUT ACCEPT || true
+        ip6tables -P OUTPUT ACCEPT || true
+        ip6tables -P FORWARD ACCEPT || true
+    fi
+    
     rm -f /etc/iptables/rules.stealth.v4 /etc/iptables/rules.attack.v4
     log "✅ Firewall restaurado a políticas por defecto."
 }
@@ -50,10 +54,14 @@ remove_apparmor_profiles() {
     if command -v aa-remove-unknown &>/dev/null; then
         aa-remove-unknown 2>/dev/null || true
     fi
-    rm -f /etc/apparmor.d/usr.bin.msfconsole
-    if command -v apparmor_parser &>/dev/null; then
-        apparmor_parser -R /etc/apparmor.d/usr.bin.msfconsole 2>/dev/null || true
+    
+    if [[ -f /etc/apparmor.d/usr.bin.msfconsole ]]; then
+        if command -v apparmor_parser &>/dev/null; then
+            apparmor_parser -R /etc/apparmor.d/usr.bin.msfconsole 2>/dev/null || true
+        fi
+        rm -f /etc/apparmor.d/usr.bin.msfconsole
     fi
+    
     systemctl reload apparmor 2>/dev/null || true
     log "✅ Perfiles de AppArmor eliminados."
 }
@@ -71,7 +79,7 @@ remove_service_and_binary() {
     systemctl disable --now kalidefender.service 2>/dev/null || true
     rm -f /etc/systemd/system/kalidefender.service
     rm -f /usr/local/bin/kalidefender.sh
-    systemctl daemon-reload
+    systemctl daemon-reload 2>/dev/null || true
     log "✅ Servicio y binario eliminados."
 }
 
@@ -84,8 +92,10 @@ remove_config_files() {
 
 remove_mac_randomization() {
     log "📡 Eliminando configuración de aleatorización de MAC..."
-    rm -f /etc/NetworkManager/conf.d/00-macrandomize.conf
-    systemctl restart NetworkManager
+    if [[ -f /etc/NetworkManager/conf.d/00-macrandomize.conf ]]; then
+        rm -f /etc/NetworkManager/conf.d/00-macrandomize.conf
+        systemctl restart NetworkManager 2>/dev/null || true
+    fi
     log "✅ Configuración de aleatorización de MAC eliminada."
 }
 
@@ -95,10 +105,13 @@ main() {
     check_root
     log "🧹 Iniciando desinstalación completa de KaliDefender v4.2..."
 
-    read -p "❓ ¿Estás seguro de que deseas desinstalar KaliDefender? [s/N] " choice
-    if [[ "$choice" != "s" && "$choice" != "S" ]]; then
-        log "Desinstalación cancelada."
-        exit 0
+    # Si no es interactivo (como en pruebas), no pedir confirmación
+    if [[ -t 0 ]]; then
+        read -p "❓ ¿Estás seguro de que deseas desinstalar KaliDefender? [s/N] " choice
+        if [[ "$choice" != "s" && "$choice" != "S" ]]; then
+            log "Desinstalación cancelada."
+            exit 0
+        fi
     fi
 
     restore_firewall
@@ -115,5 +128,4 @@ main() {
     log "💡 Si experimentas problemas de red, prueba a reiniciar: sudo systemctl restart NetworkManager"
 }
 
-main "$@"$
 main "$@"
