@@ -135,3 +135,31 @@ sudo kalidefender.sh status
    tail -f /var/log/kalidefender.log
    ```
 4. **Prueba de Fugas de DNS**: En modo Stealth, visita [https://dnsleaktest.com](https://dnsleaktest.com) para verificar que todas tus consultas DNS se están enrutando a través de la red Tor.
+
+---
+
+## 5. Configuración de Red C2 y Conectividad a Internet
+
+Un problema común al usar VPNs como Tailscale o ZeroTier es la pérdida de conectividad a Internet si la VPN intenta enrutar todo el tráfico a través de su red. KaliDefender está configurado para evitar esto mediante **Split-Tunneling**.
+
+### 5.1. Tailscale (Recomendado)
+
+Para garantizar que mantengas tu conexión a Internet mientras usas Tailscale para tu C2, el script de instalación configura las reglas de firewall necesarias. Sin embargo, al iniciar Tailscale por primera vez, se recomienda usar los siguientes flags:
+
+```bash
+sudo tailscale up --accept-dns=false --accept-routes=false
+```
+
+- `--accept-dns=false`: Evita que Tailscale sobrescriba tu configuración de DNS (especialmente importante en modo Stealth).
+- `--accept-routes=false`: Evita que Tailscale acepte rutas que podrían redirigir todo tu tráfico de Internet a través de otro nodo.
+
+### 5.2. ZeroTier
+
+ZeroTier funciona como una capa 2 virtual y es split-tunnel por defecto. KaliDefender facilita su uso abriendo automáticamente el puerto **UDP 9993** en el firewall, lo que permite que ZeroTier establezca conexiones directas (P2P) con otros nodos sin interferir con tu navegación normal.
+
+### 5.3. Resolución de Conflictos de Red
+
+Si después de activar la VPN pierdes la conexión a Internet:
+1. Verifica el estado con `sudo kalidefender.sh status`.
+2. Asegúrate de que no haya un "Exit Node" configurado en Tailscale.
+3. En modo Stealth, recuerda que el tráfico web está limitado a los puertos 80 y 443.

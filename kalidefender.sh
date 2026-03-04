@@ -84,10 +84,12 @@ detect_c2_subnet() {
         log "🔎 Red C2 detectada: Tailscale ($C2_SUBNET)"
     elif command -v zerotier-cli &>/dev/null && zerotier-cli info -j | grep -q '\"status\":\"OK\"' ; then
         C2_PROVIDER="zerotier"
-        C2_SUBNET=$(zerotier-cli listnetworks -j | grep -o '[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}/[0-9]\{1,2\}' | head -n1)
-        log "🔎 Red C2 detectada: ZeroTier ($C2_SUBNET)"
+        C2_SUBNET=$(zerotier-cli listnetworks -j | grep -o '[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}/[0-9]\{1,2\}' | head -n1 || echo "")
+        if [[ -n "$C2_SUBNET" ]]; then
+            log "🔎 Red C2 detectada: ZeroTier ($C2_SUBNET)"
+        fi
     else
-        log "ℹ️ Sin red C2 privada. Los puertos de ataque serán públicos."
+        log "ℹ️ Sin red C2 privada activa. Los puertos de ataque serán públicos."
     fi
 }
 
@@ -119,6 +121,16 @@ firewall_base() {
     # Permitir DHCP
     iptables -A OUTPUT -p udp --sport 68 --dport 67 -j ACCEPT
     iptables -A INPUT -p udp --sport 67 --dport 68 -j ACCEPT
+
+    # --- PERMITIR TRÁFICO DE CONTROL DE VPNs ---
+    # Tailscale (UDP 41641 y otros)
+    iptables -A OUTPUT -p udp --dport 41641 -j ACCEPT
+    iptables -A INPUT -p udp --sport 41641 -j ACCEPT
+    # ZeroTier (UDP 9993)
+    iptables -A OUTPUT -p udp --dport 9993 -j ACCEPT
+    iptables -A INPUT -p udp --sport 9993 -j ACCEPT
+    # STUN/ICE para VPNs
+    iptables -A OUTPUT -p udp --dport 3478 -j ACCEPT
 
     # Limitar SYN y ICMP para evitar flooding
     iptables -A INPUT -p tcp --syn -m limit --limit 2/sec --limit-burst 5 -j ACCEPT
@@ -187,7 +199,7 @@ mode_attack() {
             iptables -A INPUT -s "$C2_SUBNET" -p udp --dport "$port" -j ACCEPT
         done
     else
-        log "⚠️ ADVERTENCIA: Sin red C2 privada. Abriendo puertos a TODO Internet."
+        log "⚠️ ADVERTENCIA: Sin red C2 privada activa. Abriendo puertos a TODO Internet."
         IFS=',' read -ra TCP_PORTS <<< "$ATTACK_TCP_PORTS"
         for port in "${TCP_PORTS[@]}"; do iptables -A INPUT -p tcp --dport "$port" -j ACCEPT; done
         IFS=',' read -ra UDP_PORTS <<< "$ATTACK_UDP_PORTS"
@@ -266,19 +278,22 @@ install_secure_c2() {
         n|N) log "Instalación de C2 omitida."; return ;; 
     esac
 
-    echo "  t) Tailscale (recomendado)"
-    echo "  z) ZeroTier"
+    echo "  t) Tailscale (Recomendado - Split Tunnel automático)"
+    echo "  z) ZeroTier (Split Tunnel automático)"
     read -p "Elige una opción: " c2_choice
 
     case "$c2_choice" in
         t)  log "Instalando Tailscale..."
             curl -fsSL https://tailscale.com/install.sh | sh || true
-            echo "📌 ¡Acción requerida! Ejecuta 'sudo tailscale up' para autenticarte."
+            log "⚙️ Configurando Tailscale para evitar pérdida de conexión..."
+            echo "📌 ¡Acción requerida! Ejecuta: sudo tailscale up --accept-dns=false --accept-routes=false"
             ;;
         z)  log "Instalando ZeroTier..."
             curl -s https://install.zerotier.com | sudo bash || true
             read -p "Introduce tu Network ID de ZeroTier: " nid
+            log "⚙️ Uniendo a red ZeroTier $nid..."
             zerotier-cli join "$nid" || true
+            log "✅ ZeroTier configurado como split-tunnel por defecto."
             ;;
         *) log "Opción no válida. Omitiendo instalación de C2.";;
     esac
