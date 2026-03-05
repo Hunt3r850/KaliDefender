@@ -1,4 +1,4 @@
-# 🛡️ KaliDefender v4.2
+# 🛡️ KaliDefender v4.2.1
 
 **Sistema Dual Stealth/Attack para Pentesters Profesionales**
 
@@ -19,6 +19,8 @@
 
 - 🥷 **Modo Stealth**: Navegación 100% anónima por Tor, sin fugas DNS
 - ⚔️ **Modo Attack**: Handlers de Metasploit accesibles **solo desde tu red privada** (Tailscale/ZeroTier) con **Split-Tunneling**
+- 🐍 **Hybrid Network Manager**: Gestión avanzada de VPNs con Python integrada
+- 🧅 **Tor TransPort**: Enrutamiento transparente corregido en Modo Stealth
 - 🛡️ **AppArmor**: Metasploit aislado del sistema (no puede leer `/etc/shadow`, escribir en `/root`, etc.)
 - 📡 **MAC Randomization**: Evita tracking físico en redes WiFi
 - 🔒 **Fail2Ban + Firewall estricto**: Bloquea escaneos y ataques automatizados
@@ -346,6 +348,8 @@ Lic. Ahmed Alfonso
 
 - [x] Corrección de errores de sintaxis y robustez de scripts
 - [x] Optimización de conectividad VPN (Split-Tunneling)
+- [x] Integración de Hybrid Network Manager (Python)
+- [x] Corrección de enrutamiento Tor en Modo Stealth
 - [ ] Soporte para Wireguard nativo
 - [ ] Integración con Cobalt Strike
 - [ ] Perfiles de AppArmor para más herramientas

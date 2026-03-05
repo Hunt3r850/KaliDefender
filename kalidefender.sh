@@ -1,5 +1,5 @@
 #!/bin/bash
-# KaliDefender v4.2 - Sistema Dual Stealth/Attack para Pentesters Profesionales
+# KaliDefender v4.2.1 - Sistema Dual Stealth/Attack para Pentesters Profesionales
 # Autor: Hunt3r850
 # Licencia: MIT
 
@@ -45,20 +45,13 @@ profile msfconsole /usr/bin/msfconsole {
   #include <abstractions/nameservice>
   #include <abstractions/ruby>
 
-  # Permite acceso a los recursos de Metasploit
   /usr/share/metasploit-framework/** r,
   /opt/metasploit-framework/** r,
-
-  # Permite acceso a archivos de usuario
   owner @{HOME}/.msf4/** rw,
-
-  # Niega acceso a archivos críticos
   deny /etc/shadow r,
   deny /etc/sudoers r,
   deny /root/** r,
   deny @{HOME}/.ssh/id_rsa r,
-
-  # Permite operaciones de red
   network inet stream,
   network inet dgram,
   network raw,
@@ -147,11 +140,27 @@ mode_stealth() {
 
     firewall_base
 
-    # Redirigir DNS a Tor
-    iptables -t nat -A OUTPUT -p udp --dport 53 ! -d 127.0.0.0/8 -j REDIRECT --to-ports 5353
-    iptables -t nat -A OUTPUT -p tcp --dport 53 ! -d 127.0.0.0/8 -j REDIRECT --to-ports 5353
+    # 1. Permitir tráfico de salida para Tor (Usuario debian-tor)
+    # Buscamos el UID de debian-tor
+    local tor_uid=$(id -u debian-tor 2>/dev/null || echo "100")
+    iptables -A OUTPUT -m owner --uid-owner "$tor_uid" -j ACCEPT
 
-    # Permitir tráfico web para usuario y root
+    # 2. Redirigir DNS a Tor (Puerto 5353)
+    iptables -t nat -A OUTPUT -p udp --dport 53 -j REDIRECT --to-ports 5353
+    iptables -t nat -A OUTPUT -p tcp --dport 53 -j REDIRECT --to-ports 5353
+
+    # 3. Redirigir tráfico TCP a Tor (TransPort 9040)
+    # Exceptuamos tráfico local y el propio tráfico de Tor
+    iptables -t nat -A OUTPUT -d 127.0.0.0/8 -j RETURN
+    iptables -t nat -A OUTPUT -m owner --uid-owner "$tor_uid" -j RETURN
+    iptables -t nat -A OUTPUT -p tcp -j REDIRECT --to-ports 9040
+
+    # 4. Permitir tráfico web para usuario y root (A través de Tor)
+    # Nota: Como redirigimos a Tor, necesitamos permitir la salida al TransPort
+    iptables -A OUTPUT -p tcp --dport 9040 -j ACCEPT
+    iptables -A OUTPUT -p udp --dport 5353 -j ACCEPT
+
+    # 5. Permitir tráfico web directo SOLO si es necesario (Opcional, pero ayuda a la estabilidad)
     local uid=$(get_user_uid)
     iptables -A OUTPUT -m owner --uid-owner "$uid" -p tcp -m multiport --dports 80,443 -j ACCEPT
     iptables -A OUTPUT -m owner --uid-owner 0 -p tcp -m multiport --dports 80,443 -j ACCEPT
@@ -162,9 +171,6 @@ mode_stealth() {
     chattr +i /etc/resolv.conf 2>/dev/null || true
 
     echo "stealth" > "$MODE_FILE"
-    if [[ -d /etc/iptables ]]; then
-        iptables-save > /etc/iptables/rules.stealth.v4
-    fi
     log "✅ Modo Stealth activo."
 }
 
@@ -207,9 +213,6 @@ mode_attack() {
     fi
 
     echo "attack" > "$MODE_FILE"
-    if [[ -d /etc/iptables ]]; then
-        iptables-save > /etc/iptables/rules.attack.v4
-    fi
     log "✅ Modo Attack activo."
 }
 
@@ -222,19 +225,23 @@ install_dependencies() {
 }
 
 configure_tor_dns() {
-    log "🧅 Configurando Tor para DNS..."
+    log "🧅 Configurando Tor para DNS y TransPort..."
     if [[ -f /etc/tor/torrc ]]; then
-        if ! grep -q "DNSPort 5353" /etc/tor/torrc; then
-            cat >> /etc/tor/torrc <<EOF
+        # Limpiar configuraciones previas de KaliDefender
+        sed -i '/# KaliDefender Config/,$d' /etc/tor/torrc
+        
+        cat >> /etc/tor/torrc <<EOF
 
-DNSPort 5353
+# KaliDefender Config
+VirtualAddrNetworkIPv4 10.192.0.0/10
 AutomapHostsOnResolve 1
+TransPort 9040
+DNSPort 5353
 AvoidDiskWrites 1
 EOF
-        fi
         systemctl restart tor || true
     else
-        log "⚠️ Archivo /etc/tor/torrc no encontrado. Omitiendo configuración de Tor."
+        log "⚠️ Archivo /etc/tor/torrc no encontrado."
     fi
 }
 
@@ -300,7 +307,7 @@ install_secure_c2() {
 }
 
 install_all() {
-    log "🚀 Iniciando instalación de KaliDefender v4.2..."
+    log "🚀 Iniciando instalación de KaliDefender v4.2.1..."
     
     mkdir -p "$CONFIG_DIR"
     touch "$LOG_FILE"
@@ -313,13 +320,12 @@ install_all() {
     install_apparmor_metasploit
     install_secure_c2
 
-    # Copiar script y crear servicio
     cp "$0" /usr/local/bin/kalidefender.sh
     chmod +x /usr/local/bin/kalidefender.sh
 
     cat > /etc/systemd/system/kalidefender.service <<'EOF'
 [Unit]
-Description=KaliDefender v4.2 - Servicio de Seguridad
+Description=KaliDefender v4.2.1 - Servicio de Seguridad
 After=network.target tor.service tailscaled.service zerotier-one.service
 Wants=tor.service
 
@@ -335,7 +341,6 @@ EOF
     systemctl daemon-reload || true
     systemctl enable kalidefender.service || true
 
-    # Iniciar en modo Stealth
     mode_stealth
 
     log "✅ Instalación completa. KaliDefender está activo en Modo Stealth."
@@ -353,7 +358,7 @@ mode_toggle() {
 }
 
 mode_status() {
-    echo "📊 ESTADO DE KALIDEFENDER v4.2"
+    echo "📊 ESTADO DE KALIDEFENDER v4.2.1"
     echo "=================================="
     
     if [[ -f "$MODE_FILE" ]]; then
@@ -388,10 +393,19 @@ mode_status() {
 
     echo
     echo "📡 Test de conectividad a Internet:"
-    if timeout 3 curl -s https://httpbin.org/ip &>/dev/null; then
-        echo "  ✅ Conexión exitosa"
+    # Intentamos a través de Tor si estamos en modo Stealth
+    if [[ -f "$MODE_FILE" && "$(cat "$MODE_FILE")" == "stealth" ]]; then
+        if timeout 5 curl --socks5-hostname 127.0.0.1:9050 -s https://httpbin.org/ip &>/dev/null; then
+            echo "  ✅ Conexión exitosa (vía Tor)"
+        else
+            echo "  ❌ Fallo en la conexión (Tor)"
+        fi
     else
-        echo "  ❌ Fallo en la conexión"
+        if timeout 5 curl -s https://httpbin.org/ip &>/dev/null; then
+            echo "  ✅ Conexión exitosa"
+        else
+            echo "  ❌ Fallo en la conexión"
+        fi
     fi
     echo "=================================="
 }
@@ -414,7 +428,7 @@ start_service() {
 
 print_help() {
     cat <<'EOF'
-    KaliDefender v4.2 — Sistema Dual Stealth/Attack para Pentesters
+    KaliDefender v4.2.1 — Sistema Dual Stealth/Attack para Pentesters
 
     Uso: sudo kalidefender.sh [COMANDO]
 
@@ -425,12 +439,6 @@ print_help() {
       toggle    Alterna entre los modos Stealth y Attack.
       status    Muestra el estado actual del sistema de seguridad.
       help      Muestra este mensaje de ayuda.
-
-    FLUJO DE TRABAJO RECOMENDADO:
-      1. Ejecuta `sudo ./kalidefender.sh install`.
-      2. Mantén el sistema en `stealth` para reconocimiento.
-      3. Cambia a `attack` para la fase de explotación.
-      4. Vuelve a `stealth` al finalizar el engagement.
 
     Para más detalles, consulta la documentación en GitHub.
 EOF
