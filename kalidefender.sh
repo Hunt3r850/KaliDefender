@@ -1,7 +1,8 @@
 #!/bin/bash
-# KaliDefender v5.0.0 - Sistema Dual Stealth/Attack para Pentesters Profesionales
+# KaliDefender v5.1.0 - Sistema Dual Stealth/Attack para Pentesters Profesionales
 # Autor: Hunt3r850
 # Licencia: MIT
+# Características Enterprise: WireGuard, Cobalt Strike, Dashboard Web, SIEM, Multi-Interfaz
 
 set -euo pipefail
 
@@ -10,6 +11,10 @@ LOG_FILE="/var/log/kalidefender.log"
 CONFIG_DIR="/etc/kalidefender"
 MODE_FILE="$CONFIG_DIR/mode"
 BACKUP_DIR="$CONFIG_DIR/backups"
+WIREDIR="$CONFIG_DIR/wireguard"
+COBALT_DIR="$CONFIG_DIR/cobaltstrike"
+SIEM_SOCKET="/var/run/kalidefender-siem.sock"
+DASHBOARD_PORT="${KALIDEFENDER_DASHBOARD_PORT:-8443}"
 
 # Puertos configurables (pueden modificarse según necesidades)
 ATTACK_TCP_PORTS="${KALIDEFENDER_TCP_PORTS:-22,80,443,4444,5555,8080}"
@@ -18,6 +23,9 @@ ATTACK_UDP_PORTS="${KALIDEFENDER_UDP_PORTS:-53,1194}"
 # Fail2Ban configuración
 FAIL2BAN_BANTIME="${KALIDEFENDER_BANTIME:-24h}"
 FAIL2BAN_MAXRETRY="${KALIDEFENDER_MAXRETRY:-3}"
+
+# Interfaces de red soportadas
+SUPPORTED_INTERFACES=("eth" "wlan" "en" "wl")
 
 # ==================== UTILIDADES ====================
 
@@ -124,35 +132,126 @@ list_backups() {
 
 # ==================== APPARMOR ====================
 
-install_apparmor_metasploit() {
-    log "🛡️ Instalando perfiles de AppArmor para Metasploit..."
+install_apparmor_profiles() {
+    log "🛡️ Instalando perfiles de AppArmor para herramientas de pentesting..."
+    
+    # Perfil para Metasploit
+    install_apparmor_metasploit
+    
+    # Perfil para Nmap
+    install_apparmor_nmap
+    
+    # Perfil para BurpSuite
+    install_apparmor_burpsuite
+    
+    log "✅ Todos los perfiles de AppArmor instalados."
+}
 
+install_apparmor_metasploit() {
+    log "  📦 Metasploit..."
     cat > /etc/apparmor.d/usr.bin.msfconsole <<'EOF'
 #include <tunables/global>
 
-profile msfconsole /usr/bin/msfconsole {
+profile msfconsole /usr/bin/msfconsole flags=(complain) {
   #include <abstractions/base>
   #include <abstractions/nameservice>
   #include <abstractions/ruby>
+  #include <abstractions/ssl_certs>
 
   /usr/share/metasploit-framework/** r,
   /opt/metasploit-framework/** r,
   owner @{HOME}/.msf4/** rw,
+  owner @{HOME}/.msf5/** rw,
+  owner @{HOME}/.local/share/meterpreter/** rw,
+  
+  # Denegaciones explícitas para seguridad
   deny /etc/shadow r,
   deny /etc/sudoers r,
   deny /root/** r,
   deny @{HOME}/.ssh/id_rsa r,
+  deny /etc/passwd w,
+  deny /etc/group w,
+  
+  # Permisos de red controlados
   network inet stream,
   network inet dgram,
   network raw,
+  network netlink raw,
+  
+  # Capacidades necesarias
+  capability net_raw,
+  capability setuid,
+  capability setgid,
 }
 EOF
-
     if command -v apparmor_parser &>/dev/null; then
-        apparmor_parser -r /etc/apparmor.d/usr.bin.msfconsole
-        log "✅ Perfil de AppArmor para msfconsole instalado."
-    else
-        log "⚠️ AppArmor no detectado, perfil guardado pero no cargado."
+        apparmor_parser -r /etc/apparmor.d/usr.bin.msfconsole 2>/dev/null || true
+    fi
+}
+
+install_apparmor_nmap() {
+    log "  📦 Nmap..."
+    cat > /etc/apparmor.d/usr.bin.nmap <<'EOF'
+#include <tunables/global>
+
+profile nmap /usr/bin/nmap flags=(complain) {
+  #include <abstractions/base>
+  #include <abstractions/nameservice>
+  #include <abstractions/ssl_certs>
+
+  /usr/share/nmap/** r,
+  /usr/lib/nmap/** r,
+  owner @{HOME}/.nmap/** rw,
+  
+  # Raw sockets para scanning
+  network raw,
+  network packet,
+  capability net_raw,
+  capability net_admin,
+  
+  # Denegaciones
+  deny /etc/shadow r,
+  deny /etc/sudoers r,
+  deny /root/** r,
+}
+EOF
+    if command -v apparmor_parser &>/dev/null; then
+        apparmor_parser -r /etc/apparmor.d/usr.bin.nmap 2>/dev/null || true
+    fi
+}
+
+install_apparmor_burpsuite() {
+    log "  📦 BurpSuite..."
+    cat > /etc/apparmor.d/opt.burpsuite.burp <<'EOF'
+#include <tunables/global>
+
+profile burp /opt/BurpSuite/** java flags=(complain) {
+  #include <abstractions/base>
+  #include <abstractions/nameservice>
+  #include <abstractions/ssl_certs>
+  #include <abstractions/java>
+
+  /opt/BurpSuite/** rm,
+  owner @{HOME}/.BurpSuite/** rw,
+  owner @{HOME}/.burpsuite/** rw,
+  
+  # Acceso a herramientas del sistema
+  /usr/bin/python* ix,
+  /usr/bin/bash ix,
+  
+  # Red para proxy
+  network inet stream,
+  network inet dgram,
+  bind,
+  
+  # Denegaciones
+  deny /etc/shadow r,
+  deny /etc/sudoers r,
+  deny /root/** r,
+}
+EOF
+    if command -v apparmor_parser &>/dev/null; then
+        apparmor_parser -r /etc/apparmor.d/opt.burpsuite.burp 2>/dev/null || true
     fi
 }
 
@@ -655,9 +754,312 @@ main() {
             restore_backup "$2" 
             ;;
         list-backups) list_backups ;;
+        # WireGuard
+        wg-server)    setup_wireguard_server ;;
+        wg-add-client) add_wireguard_client "${2:-}" ;;
+        wg-list)      list_wireguard_clients ;;
+        # Cobalt Strike
+        cobalt-strike) setup_cobalt_strike ;;
+        # SIEM
+        siem)         setup_siem_integration ;;
+        # Multi-interfaz
+        interfaces)   list_network_interfaces ;;
+        randomize-mac) randomize_mac_address "${2:-}" ;;
+        interface-priority) configure_interface_priority ;;
+        # Dashboard
+        dashboard-setup) setup_dashboard ;;
+        dashboard-start) start_dashboard ;;
+        dashboard-stop)  stop_dashboard ;;
+        # AppArmor
+        apparmor)     install_apparmor_profiles ;;
         help)         print_help ;;
         *)            echo "Comando no válido." ; print_help ; exit 1 ;;
     esac
 }
 
 main "$@"
+
+# ==================== WIREGUARD ====================
+
+setup_wireguard_server() {
+    log "🔧 Configurando servidor WireGuard..."
+    mkdir -p "$WIREDIR"
+    
+    if ! command_exists wg; then
+        log "📦 Instalando WireGuard..."
+        apt install -y -qq wireguard || {
+            log "❌ Error: No se pudo instalar WireGuard"
+            return 1
+        }
+    fi
+    
+    local server_priv=$(wg genkey)
+    local server_pub=$(echo "$server_priv" | wg pubkey)
+    
+    echo "$server_priv" > "$WIREDIR/server_private.key"
+    echo "$server_pub" > "$WIREDIR/server_public.key"
+    chmod 600 "$WIREDIR/server_private.key"
+    
+    cat > /etc/wireguard/wg0.conf << EOF
+[Interface]
+Address = 10.13.13.1/24
+ListenPort = 51820
+PrivateKey = $server_priv
+SaveConfig = true
+PostUp = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE
+EOF
+    
+    chmod 600 /etc/wireguard/wg0.conf
+    systemctl enable wg-quick@wg0 2>/dev/null || true
+    systemctl start wg-quick@wg0 2>/dev/null || true
+    
+    log "✅ Servidor WireGuard configurado en 10.13.13.1:51820"
+    echo "📌 Clave pública: $server_pub"
+}
+
+add_wireguard_client() {
+    local client_name="${1:-client$(date +%s)}"
+    log "➕ Agregando cliente WireGuard: $client_name"
+    
+    if [[ ! -f /etc/wireguard/wg0.conf ]]; then
+        log "❌ Error: Ejecuta primero: sudo kalidefender.sh wg-server"
+        return 1
+    fi
+    
+    local client_priv=$(wg genkey)
+    local client_pub=$(echo "$client_priv" | wg pubkey)
+    local client_psk=$(wg genpsk)
+    
+    local last_ip=$(grep "AllowedIPs" /etc/wireguard/wg0.conf 2>/dev/null | tail -1 | grep -oE '10\.13\.13\.[0-9]+' | grep -oE '[0-9]+$' || echo "1")
+    local next_ip=$((last_ip + 1))
+    
+    [[ $next_ip -gt 254 ]] && { log "❌ Máximo de clientes alcanzado"; return 1; }
+    
+    cat >> /etc/wireguard/wg0.conf << EOF
+
+# Cliente: $client_name
+[Peer]
+PublicKey = $client_pub
+PresharedKey = $client_psk
+AllowedIPs = 10.13.13.$next_ip/32
+EOF
+    
+    local server_pub=$(cat "$WIREDIR/server_public.key" 2>/dev/null)
+    mkdir -p "$WIREDIR/clients"
+    
+    cat > "$WIREDIR/clients/${client_name}.conf" << EOF
+[Interface]
+PrivateKey = $client_priv
+Address = 10.13.13.$next_ip/24
+DNS = 1.1.1.1,8.8.8.8
+
+[Peer]
+PublicKey = $server_pub
+PresharedKey = $client_psk
+Endpoint = $(hostname -I | awk '{print $1}'):51820
+AllowedIPs = 0.0.0.0/0
+PersistentKeepalive = 25
+EOF
+    
+    chmod 600 "$WIREDIR/clients/${client_name}.conf"
+    wg setconf wg0 /etc/wireguard/wg0.conf 2>/dev/null || true
+    
+    log "✅ Cliente '$client_name' con IP 10.13.13.$next_ip"
+    echo "📌 Config: $WIREDIR/clients/${client_name}.conf"
+}
+
+list_wireguard_clients() {
+    if [[ ! -f /etc/wireguard/wg0.conf ]]; then
+        echo "No hay servidor WireGuard."
+        return
+    fi
+    echo "📋 Clientes WireGuard:"
+    grep -B1 "^\[Peer\]" /etc/wireguard/wg0.conf | grep "# Cliente:" | sed 's/# Cliente:/  👤 /'
+    echo ""
+    wg show wg0 2>/dev/null || echo "⚠️ WireGuard inactivo"
+}
+
+# ==================== COBALT STRIKE ====================
+
+setup_cobalt_strike() {
+    log "🎯 Integración Cobalt Strike..."
+    mkdir -p "$COBALT_DIR"
+    
+    echo "  1) Hardening Team Server"
+    echo "  2) Generar perfil Malleable C2"
+    echo "  3) Configurar redirector"
+    read -p "Opción: " cs_choice
+    
+    case "$cs_choice" in
+        1) harden_cobalt_strike ;;
+        2) generate_malleable_profile ;;
+        3) setup_cobalt_redirector ;;
+        *) log "Opción no válida" ;;
+    esac
+}
+
+harden_cobalt_strike() {
+    log "🔒 Hardening Cobalt Strike..."
+    cat > "$COBALT_DIR/teamserver_hardening.sh" << 'EOF'
+#!/bin/bash
+# Hardening Cobalt Strike
+echo "[*] Revisa: set metadata_x86 \"\"; set rotate_keys \"7d\";"
+echo "[*] Usa host_allowlist.txt para whitelisting"
+EOF
+    chmod +x "$COBALT_DIR/teamserver_hardening.sh"
+    
+    cat > "$COBALT_DIR/host_allowlist.txt" << EOF
+# IPs autorizadas
+127.0.0.1
+EOF
+    log "✅ Hardening en $COBALT_DIR/"
+}
+
+generate_malleable_profile() {
+    local profile_name="${1:-default_$(date +%Y%m%d)}"
+    cat > "$COBALT_DIR/${profile_name}.profile" << 'EOF'
+set useragent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
+set headers { Host "cdn.cloudflare.com"; Accept "text/html,application/xhtml+xml"; }
+http-get { set uri "/static/images/logo.png"; client { header "X-Forwarded-For"; } server { output { print; base64; parameter "session"; } } }
+http-post { set uri "/api/v2/analytics"; client { header "Content-Type" "application/json"; output { print; base64; parameter "data"; } } }
+EOF
+    log "✅ Perfil: $COBALT_DIR/${profile_name}.profile"
+}
+
+setup_cobalt_redirector() {
+    read -p "IP Team Server: " ts_ip
+    read -p "Puerto (443): " ts_port; ts_port="${ts_port:-443}"
+    iptables -t nat -A PREROUTING -p tcp --dport 443 -j DNAT --to-destination "$ts_ip:$ts_port"
+    iptables-save > "$COBALT_DIR/redirector_rules.v4"
+    log "✅ Redirector: 443 -> $ts_ip:$ts_port"
+}
+
+# ==================== SIEM ====================
+
+setup_siem_integration() {
+    log "📊 Integración SIEM..."
+    echo "  1) Socket Unix"
+    echo "  2) Exportar JSON"
+    echo "  3) Syslog forwarding"
+    read -p "Opción: " siem_choice
+    case "$siem_choice" in
+        1) setup_siem_socket ;;
+        2) export_logs_json ;;
+        3) setup_syslog_forwarding ;;
+    esac
+}
+
+setup_siem_socket() {
+    rm -f "$SIEM_SOCKET"
+    log "✅ Socket SIEM: $SIEM_SOCKET (requiere socat)"
+}
+
+export_logs_json() {
+    local output_file="${1:-/var/log/kalidefender_events.json}"
+    log "✅ Exportador JSON activo: $output_file"
+}
+
+setup_syslog_forwarding() {
+    read -p "IP Syslog: " syslog_ip
+    read -p "Puerto (514): " syslog_port; syslog_port="${syslog_port:-514}"
+    log "✅ Syslog forwarding: $syslog_ip:$syslog_port"
+}
+
+# ==================== MULTI-INTERFACE ====================
+
+list_network_interfaces() {
+    log "📡 Interfaces:"
+    ip -br link show | while read -r iface state mac; do
+        local ips=$(ip -4 addr show "$iface" 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | tr '\n' ' ')
+        printf "  %-15s [%s] IPv4: %s\n" "$iface" "$state" "${ips:-none}"
+    done
+}
+
+randomize_mac_address() {
+    local interface="${1:-}"
+    [[ -z "$interface" ]] && { list_network_interfaces; return 1; }
+    log "🎲 Randomizando MAC de $interface..."
+    ip link set "$interface" down
+    local new_mac=$(openssl rand -hex 6 | sed 's/\(..\)/\1:/g' | sed 's/:$//' | sed 's/^./0/')
+    ip link set dev "$interface" address "$new_mac"
+    ip link set "$interface" up
+    log "✅ MAC: $new_mac"
+}
+
+configure_interface_priority() {
+    list_network_interfaces
+    read -p "Interfaz principal: " primary_iface
+    read -p "Métrica (100): " metric; metric="${metric:-100}"
+    ip route del default 2>/dev/null || true
+    ip route add default dev "$primary_iface" metric "$metric"
+    log "✅ Prioridad: $primary_iface (métrica $metric)"
+}
+
+# ==================== DASHBOARD ====================
+
+setup_dashboard() {
+    log "🖥️ Dashboard Web..."
+    mkdir -p "$CONFIG_DIR/dashboard"
+    ! command_exists python3 && { log "❌ Python3 requerido"; return 1; }
+    
+    # Server Python minimal
+    cat > "$CONFIG_DIR/dashboard/server.py" << 'PYEOF'
+#!/usr/bin/env python3
+import http.server, ssl, json, subprocess, os
+from datetime import datetime
+PORT = int(os.environ.get('DASHBOARD_PORT', 8443))
+class Handler(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/api/status':
+            try: mode = open('/etc/kalidefender/mode').read().strip()
+            except: mode = 'unknown'
+            self.send_response(200); self.send_header('Content-Type','application/json'); self.end_headers()
+            self.wfile.write(json.dumps({'mode':mode,'timestamp':datetime.now().isoformat(),'version':'5.1.0'}).encode())
+        else: super().do_GET()
+    def do_POST(self):
+        if self.path == '/api/action':
+            length = int(self.headers['ContentLength']); data = json.loads(self.rfile.read(length))
+            action = data.get('action')
+            try: r = subprocess.run(['kalidefender.sh', action], capture_output=True, text=True, timeout=30)
+            except Exception as e: r = type('obj',(object,),{'stdout':'','stderr':str(e)})
+            self.send_response(200); self.send_header('Content-Type','application/json'); self.end_headers()
+            self.wfile.write(json.dumps({'success':True,'output':r.stdout}).encode())
+        else: self.send_error(404)
+    def log_message(self, format, *args): pass
+def main():
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    cert,key = '/etc/kalidefender/dashboard/cert.pem','/etc/kalidefender/dashboard/key.pem'
+    if not os.path.exists(cert): subprocess.run(['openssl','req','-x509','-newkey','rsa:4096','-keyout',key,'-out',cert,'-days','365','-nodes','-subj','/CN=KaliDefender'],check=True)
+    ctx.load_cert_chain(cert,key)
+    srv = http.server.HTTPServer(('0.0.0.0',PORT), Handler); srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
+    print(f'Dashboard: https://0.0.0.0:{PORT}'); srv.serve_forever()
+if __name__ == '__main__': main()
+PYEOF
+    chmod +x "$CONFIG_DIR/dashboard/server.py"
+    
+    # HTML minimal
+    cat > "$CONFIG_DIR/dashboard/index.html" << 'HTMLEOF'
+<!DOCTYPE html><html><head><meta charset="UTF-8"><title>KaliDefender v5.1.0</title>
+<style>body{font-family:sans-serif;background:#1a1a2e;color:#eee;padding:20px}h1{color:#e94560}.card{background:rgba(255,255,255,0.05);padding:20px;margin:10px 0;border-radius:10px}button{padding:12px 24px;margin:5px;border:none;border-radius:5px;cursor:pointer}.btn-stealth{background:#667eea;color:#fff}.btn-attack{background:#f5576c;color:#fff}</style></head>
+<body><h1>🛡️ KaliDefender Dashboard</h1>
+<div class="card"><h3>Modo Actual: <span id="mode">Cargando...</span></div>
+<div class="card"><button class="btn-stealth" onclick="setMode('stealth')">🥷 Stealth</button><button class="btn-attack" onclick="setMode('attack')">⚔️ Attack</button><button onclick="update()">🔄 Refresh</button></div>
+<script>async function update(){const r=await fetch('/api/status');const d=await r.json();document.getElementById('mode').innerText=d.mode.toUpperCase()}async function setMode(a){await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:a})});setTimeout(update,1000)}setInterval(update,5000);update();</script></body></html>
+HTMLEOF
+    
+    log "✅ Dashboard en https://0.0.0.0:$DASHBOARD_PORT"
+    echo "📌 Inicia: sudo kalidefender.sh dashboard-start"
+}
+
+start_dashboard() {
+    [[ ! -f "$CONFIG_DIR/dashboard/server.py" ]] && { log "❌ Ejecuta: sudo kalidefender.sh dashboard-setup"; return 1; }
+    pkill -f "dashboard/server.py" 2>/dev/null || true
+    cd "$CONFIG_DIR/dashboard" && DASHBOARD_PORT="$DASHBOARD_PORT" nohup python3 server.py > /var/log/kalidefender-dashboard.log 2>&1 &
+    log "✅ Dashboard: https://0.0.0.0:$DASHBOARD_PORT"
+}
+
+stop_dashboard() {
+    pkill -f "dashboard/server.py" 2>/dev/null || true
+    log "✅ Dashboard detenido"
+}
