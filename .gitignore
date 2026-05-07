@@ -1,32 +1,42 @@
+```
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+.venv/
+.env
+.env.local
+.env.*
+
 # Logs
 *.log
-/var/log/kalidefender.log
 
-# Archivos temporales
-*.tmp
-*~
-*.swp
-*.swo
+# OS
 .DS_Store
+Thumbs.db
 
-# Binarios locales
-kalidefender
-
-# Documentos generados
-docs/*.pdf
-
-# Configuraciones locales
-*.local
-.env
-
-# Backups
-*.bak
-*.backup
-
-# IDE
+# Editor
 .vscode/
 .idea/
-*.sublime-*
+*.swp
+*.swo
+*.tmp
 
-# Sistema
-Thumbs.db
+# Build/dist
+dist/
+build/
+*.egg-info/
+
+# Testing
+.coverage
+htmlcov/
+.coverage.*
+.pytest_cache/
+.mypy_cache/
+
+# Dependencies
+node_modules/
+```
