@@ -105,21 +105,26 @@ En operaciones de seguridad ofensiva, el contexto es crítico. Necesitas dos per
 
 KaliDefender/
 ├── README.md # Documentación principal
+
 ├── CHANGELOG.md # Historial de cambios
+
 ├── GUIDE.md # Guía de uso detallada
+
 ├── INSTALL.md # Instrucciones de instalación
-|
+
 ├── UNINSTALL.md # Desinstalación completa
-|
+
 ├── LICENSE # Licencia MIT
-|
+
 ├── kalidefender.sh # Script principal (CLI)
-|
+
 ├── kalidefender_uninstall.sh # Script de desinstalación
-|
+
 └── hybrid_net_manager.py # Dashboard web (Python)
 
+
 ###  Estructura en el Sistema
+
 
 /etc/kalidefender/ # Directorio principal de configuración
 
@@ -188,7 +193,7 @@ KaliDefender/
 
 ### Instalación Rápida (3 Pasos)
 
-```bash
+``bash
 # 1. Clonar el repositorio
 git clone https://github.com/Hunt3r850/KaliDefender.git
 cd KaliDefender
@@ -255,3 +260,146 @@ sudo kalidefender status
 
 # Verificar logs en tiempo real
 tail -f /var/log/kalidefender.log
+
+
+🤝 Contribuir
+Cómo Contribuir
+¡Las contribuciones son bienvenidas! Aquí hay algunas formas de ayudar:
+
+🐛 Reportar Bugs
+Usa el template de "Bug Report" en GitHub Issues
+
+Incluye:
+
+Versión de KaliDefender
+
+Versión de Kali Linux
+
+Logs relevantes (/var/log/kalidefender.log)
+
+Pasos para reproducir el error
+
+💡 Sugerir Mejoras
+
+1. Usa el template de "Feature Request"
+
+2. Describe el caso de uso y por qué sería útil
+
+3. Si es posible, incluye un ejemplo de implementación
+
+🔧 Enviar Pull Requests
+
+1. Fork el repositorio
+
+2. Crea una rama para tu feature: git checkout -b feature/nueva-funcionalidad
+
+3. Sigue las guías de estilo:
+
+     Shell Script: Google Shell Style Guide
+
+     Python: PEP 8
+
+4. Asegúrate de que el código pasa las pruebas:
+
+    # Linting de shell
+    shellcheck kalidefender.sh
+
+    # Linting de Python
+    pylint hybrid_net_manager.py
+
+5. Documenta tu código con comentarios claros
+
+6. Envía el PR con una descripción detallada
+
+### Áreas que Necesitan Ayuda
+
+- Soporte para nftables (reemplazo moderno de iptables)
+
+- Modo "Paranoico" con bloqueo activo de DNS over HTTPS (DoH)
+
+- Integración nativa con Sliver C2
+
+- Integración nativa con Mythic C2
+
+- Dashboard web completo (React/Vue.js + backend)
+
+- Tests automatizados (bats para bash, pytest para Python)
+
+- Empaquetado como .deb para instalación simplificada
+
+- Traducciones (i18n) a múltiples idiomas
+
+- Detección de fingerpinting de red
+
+- Modo "Entrenamiento" para simular entornos de práctica
+
+Guías de Estilo
+
+# Nombres de funciones: snake_case
+mi_funcion_ejemplo() {
+    local variable_local="valor"
+    echo "$variable_local"
+}
+
+# Variables globales: UPPER_CASE
+readonly CONFIG_DIR="/etc/miapp"
+
+# Comentarios: Explicar el "por qué", no el "qué"
+# Mal: iptables -F  # Borrar reglas
+# Bien: iptables -F  # Limpiar reglas previas para evitar conflictos con cambios anteriores
+
+
+Python (Dashboard)
+
+def secure_endpoint():
+    """
+    Endpoint seguro con validación de entrada.
+    
+    Returns:
+        dict: Respuesta JSON con estado de la operación
+    """
+    # Whitelist de acciones permitidas
+    allowed = ['stealth', 'attack', 'status']
+    
+    if action not in allowed:
+        return {'error': 'Acción no permitida'}, 403
+
+
+
+📜 Licencia y Responsabilidad
+
+Licencia MIT
+
+MIT License
+
+Copyright (c) 2024 Hunt3r850
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+⚠️ Aviso de Responsabilidad
+KaliDefender es una herramienta diseñada exclusivamente para:
+
+✅ Profesionales de seguridad autorizados
+
+✅ Pentesters con autorización explícita por escrito
+
+✅ Investigadores de seguridad en entornos controlados
+
+✅ Uso educativo
+
