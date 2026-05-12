@@ -1,25 +1,3 @@
-================================================================================
-                    KALIDEFENDER v6.0.0 - REPOSITORIO COMPLETO
-================================================================================
-
-Este archivo contiene TODO el contenido necesario para actualizar el repositorio
-completo. Cada sección corresponde a un archivo individual del proyecto.
-
-ESTRUCTURA:
-  1. README.md
-  2. CHANGELOG.md
-  3. GUIDE.md
-  4. INSTALL.md
-  5. UNINSTALL.md
-  6. LICENSE
-  7. kalidefender.sh
-  8. kalidefender_uninstall.sh
-  9. hybrid_net_manager.py
-
-================================================================================
-                            ARCHIVO: README.md
-================================================================================
-
 <div align="center">
   <img src="https://img.shields.io/badge/KaliDefender-v6.0.0-red?style=for-the-badge&logo=kali-linux&logoColor=white" alt="KaliDefender Banner"/>
   <br/>
