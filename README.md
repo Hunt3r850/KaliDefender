@@ -104,13 +104,9 @@ En operaciones de seguridad ofensiva, el contexto es crítico. Necesitas dos per
 ### Estructura de Archivos del Proyecto
 
 KaliDefender/
-|
 ├── README.md # Documentación principal
-|
 ├── CHANGELOG.md # Historial de cambios
-|
 ├── GUIDE.md # Guía de uso detallada
-|
 ├── INSTALL.md # Instrucciones de instalación
 |
 ├── UNINSTALL.md # Desinstalación completa
