@@ -1,52 +1,75 @@
 <div align="center">
-  <img src="https://via.placeholder.com/150/FF0000/FFFFFF?text=KaliDefender" alt="KaliDefender Shield" width="150"/>
-  <h1>🛡️ KaliDefender v5.1.0</h1>
-  <p>
-    <strong>Sistema de Perfilado de Red Dual para el Pentester Moderno.</strong><br>
-    Alterna al instante entre un modo Stealth (privacidad total a través de Tor) y un modo Attack (exposición controlada para C2 y pentesting), todo desde una interfaz unificada.
-  </p>
+  <img src="https://img.shields.io/badge/KaliDefender-v6.0.0-red?style=for-the-badge&logo=kali-linux&logoColor=white" alt="KaliDefender Banner"/>
   <br/>
+  <img src="https://img.shields.io/badge/Platform-Kali%20Linux-blueviolet?style=flat-square&logo=linux&logoColor=white" alt="Platform"/>
+  <img src="https://img.shields.io/badge/License-MIT-yellow?style=flat-square" alt="License"/>
+  <img src="https://img.shields.io/badge/Bash-5.0%2B-green?style=flat-square&logo=gnu-bash&logoColor=white" alt="Bash"/>
+  <img src="https://img.shields.io/badge/Python-3.8%2B-blue?style=flat-square&logo=python&logoColor=white" alt="Python"/>
+  <img src="https://img.shields.io/badge/Security-Paranoid-red?style=flat-square" alt="Security"/>
+  <br/><br/>
+  
+  <h1>🛡️ KaliDefender v6.0.0</h1>
+  <h3>Sistema Modular de Perfilado de Red para Operaciones de Seguridad Ofensiva</h3>
+  
   <p>
-    <img src="https://img.shields.io/badge/platform-Kali%20Linux-blueviolet" alt="Platform"/>
-    <img src="https://img.shields.io/github/license/Hunt3r850/KaliDefender" alt="License MIT"/>
-    <img src="https://img.shields.io/badge/version-5.1.0--RC-blue" alt="Version"/>
-    <img src="https://img.shields.io/badge/security-paranoid-red" alt="Security Level"/>
+    <strong>Transforma tu Kali Linux en una plataforma de operaciones con doble personalidad:</strong><br/>
+    Un fantasma digital invisible para reconocimiento ➡️ Un arsenal preparado para el ataque<br/>
+    Todo con un solo comando y sin comprometer tu OPSEC.
   </p>
 </div>
 
 ---
 
-## 💡 Filosofía: Seguridad Operacional (OPSEC) a un Comando de Distancia
+## 📑 Tabla de Contenidos
 
-En las operaciones de red, el contexto lo es todo. La misma máquina que se usa para navegar de forma anónima e investigar (Modo Stealth) no debería estar expuesta con puertos abiertos para un ataque activo (Modo Attack). KaliDefender resuelve esta dualidad permitiéndote cambiar el comportamiento de red de tu sistema de forma instantánea y segura, sin tener que gestionar decenas de reglas de firewall manualmente.
+- [🎯 Visión General](#-visión-general)
+- [✨ Características Principales](#-características-principales)
+- [🏗️ Arquitectura del Sistema](#️-arquitectura-del-sistema)
+- [📦 Instalación](#-instalación)
+- [🚀 Guía de Uso Rápido](#-guía-de-uso-rápido)
+- [📖 Documentación Completa](#-documentación-completa)
+  - [Modo Stealth: El Fantasma Digital](#modo-stealth-el-fantasma-digital)
+  - [Modo Attack: El Arsenal Preparado](#modo-attack-el-arsenal-preparado)
+  - [Dashboard Web Seguro](#dashboard-web-seguro)
+  - [Sistema de Backups](#sistema-de-backups)
+  - [Integración con Redes C2](#integración-con-redes-c2)
+- [⚙️ Configuración Avanzada](#️-configuración-avanzada)
+- [🔧 Solución de Problemas](#-solución-de-problemas)
+- [🤝 Contribuir](#-contribuir)
+- [📜 Licencia y Responsabilidad](#-licencia-y-responsabilidad)
+- [🙏 Agradecimientos](#-agradecimientos)
 
-## ✨ Características Clave
+---
 
-### 🔷 Modo Stealth: El Fantasma Digital
-*   **Tunelización Forzada por Tor:** Todo el tráfico TCP y las peticiones DNS son redirigidos de forma transparente a través de la red Tor. Sin fugas.
-*   **DNS Inmutable:** Bloquea y sella tu archivo `/etc/resolv.conf` para prevenir cualquier fuga de DNS.
-*   **Aislamiento de Tráfico:** Niega cualquier conexión de salida directa, garantizando que solo el tráfico del proceso Tor pueda salir a Internet.
+## 🎯 Visión General
 
-### 🔴 Modo Attack: El Arsenal Preparado
-*   **Apertura Selectiva de Puertos:** Expón tus herramientas de pentesting (Metasploit, Empire, servidores web) en los puertos que definas.
-*   **Enlace C2 Inteligente:** Detecta automáticamente tu red privada (Tailscale o ZeroTier) y restringe la exposición de los puertos de ataque **solo a esa red privada**, nunca a Internet de forma accidental.
-*   **Fortalecimiento de Herramientas:** Integra perfiles de AppArmor para herramientas comunes como `nmap` y `msfconsole`, limitando el alcance de posibles exploits dirigidos a tu propio arsenal.
+### El Problema que Resuelve
 
-### 🧩 Funcionalidades Adicionales
-*   **Dashboard Web (Experimental):** Una API y panel web para monitorizar y cambiar el modo de la máquina de forma remota.
-*   **Fail2Ban Adaptativo:** Monitoriza los intentos de conexión rechazados y banea automáticamente la IP del atacante.
-*   **Sistema de Backups:** Guarda y restaura configuraciones de firewall y red completas antes de grandes cambios.
-*   **WireGuard & Cobalt Strike Integration (Plantillas):** Pre-configuraciones para desplegar rápidamente tu propia VPN y redirectores de C2.
+En operaciones de seguridad ofensiva, el contexto es crítico:
 
-## 🚀 Instalación y Uso Rápido
+- **Reconocimiento e Investigación:** Necesitas navegar de forma anónima, sin exponer tu identidad ni tus herramientas.
+- **Ataque Activo:** Necesitas tener puertos abiertos para recibir conexiones reversas, alojar payloads o comandar implantes.
+
+Gestionar manualmente reglas de firewall, configuración de Tor, y asegurarte de no cometer errores de OPSEC es tedioso y propenso a fallos. **KaliDefender automatiza esta dualidad de forma segura y profesional.**
+
+### La Solución
+
+KaliDefender te permite cambiar instantáneamente entre dos perfiles de red completamente diferentes:
+
+| Característica | Modo Stealth 🥷 | Modo Attack ⚔️ |
+|---------------|-----------------|-----------------|
+| **Tráfico de salida** | 100% a través de Tor | Directo (controlado por usuario) |
+| **Puertos de entrada** | Todos cerrados | Abiertos selectivamente |
+| **Resolución DNS** | A través de Tor (localhost) | DNS público (Cloudflare/Google) |
+| **Red C2 privada** | No aplica | Detectada y usada automáticamente |
+| **Exposición a Internet** | Invisible | Controlada y consciente |
+| **Caso de uso** | OSINT, investigación, navegación anónima | Pentesting, red team, C2 |
+
+---
+
+## ✨ Características Principales
+
+### 🔷 Modo Stealth - Privacidad Total
 
 ```bash
-# 1. Clonar el repositorio
-git clone https://github.com/Hunt3r850/KaliDefender.git
-cd KaliDefender
-
-# 2. Instalar (requiere sudo)
-sudo chmod +x kalidefender.sh
-sudo ./kalidefender.sh install
-
-# La instalación configura todo y activa el Modo Stealth.
+sudo kalidefender stealth
