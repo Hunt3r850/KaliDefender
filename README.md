@@ -1,3 +1,25 @@
+================================================================================
+                    KALIDEFENDER v6.0.0 - REPOSITORIO COMPLETO
+================================================================================
+
+Este archivo contiene TODO el contenido necesario para actualizar el repositorio
+completo. Cada sección corresponde a un archivo individual del proyecto.
+
+ESTRUCTURA:
+  1. README.md
+  2. CHANGELOG.md
+  3. GUIDE.md
+  4. INSTALL.md
+  5. UNINSTALL.md
+  6. LICENSE
+  7. kalidefender.sh
+  8. kalidefender_uninstall.sh
+  9. hybrid_net_manager.py
+
+================================================================================
+                            ARCHIVO: README.md
+================================================================================
+
 <div align="center">
   <img src="https://img.shields.io/badge/KaliDefender-v6.0.0-red?style=for-the-badge&logo=kali-linux&logoColor=white" alt="KaliDefender Banner"/>
   <br/>
@@ -28,16 +50,10 @@
 - [📦 Instalación](#-instalación)
 - [🚀 Guía de Uso Rápido](#-guía-de-uso-rápido)
 - [📖 Documentación Completa](#-documentación-completa)
-  - [Modo Stealth: El Fantasma Digital](#modo-stealth-el-fantasma-digital)
-  - [Modo Attack: El Arsenal Preparado](#modo-attack-el-arsenal-preparado)
-  - [Dashboard Web Seguro](#dashboard-web-seguro)
-  - [Sistema de Backups](#sistema-de-backups)
-  - [Integración con Redes C2](#integración-con-redes-c2)
 - [⚙️ Configuración Avanzada](#️-configuración-avanzada)
 - [🔧 Solución de Problemas](#-solución-de-problemas)
 - [🤝 Contribuir](#-contribuir)
 - [📜 Licencia y Responsabilidad](#-licencia-y-responsabilidad)
-- [🙏 Agradecimientos](#-agradecimientos)
 
 ---
 
@@ -45,18 +61,16 @@
 
 ### El Problema que Resuelve
 
-En operaciones de seguridad ofensiva, el contexto es crítico:
+En operaciones de seguridad ofensiva, el contexto es crítico. Necesitas dos personalidades de red completamente diferentes según la fase de la operación:
 
-- **Reconocimiento e Investigación:** Necesitas navegar de forma anónima, sin exponer tu identidad ni tus herramientas.
-- **Ataque Activo:** Necesitas tener puertos abiertos para recibir conexiones reversas, alojar payloads o comandar implantes.
-
-Gestionar manualmente reglas de firewall, configuración de Tor, y asegurarte de no cometer errores de OPSEC es tedioso y propenso a fallos. **KaliDefender automatiza esta dualidad de forma segura y profesional.**
+- **Fase de Reconocimiento:** Debes ser invisible, todo el tráfico anónimo, sin puertos expuestos.
+- **Fase de Ataque Activo:** Necesitas puertos abiertos para recibir conexiones, pero sin exponerte a Internet accidentalmente.
 
 ### La Solución
 
-KaliDefender te permite cambiar instantáneamente entre dos perfiles de red completamente diferentes:
+**KaliDefender** te permite cambiar instantáneamente entre dos perfiles de red completamente diferentes con un solo comando:
 
-| Característica | Modo Stealth 🥷 | Modo Attack ⚔️ |
+| Característica | 🥷 Modo Stealth | ⚔️ Modo Attack |
 |---------------|-----------------|-----------------|
 | **Tráfico de salida** | 100% a través de Tor | Directo (controlado por usuario) |
 | **Puertos de entrada** | Todos cerrados | Abiertos selectivamente |
@@ -70,6 +84,43 @@ KaliDefender te permite cambiar instantáneamente entre dos perfiles de red comp
 ## ✨ Características Principales
 
 ### 🔷 Modo Stealth - Privacidad Total
+- **TransProxy de Tor:** Todo el tráfico TCP es redirigido automáticamente a través de Tor usando TransPort (9040)
+- **DNS sobre Tor:** Todas las consultas DNS son redirigidas al resolver de Tor (DNSPort 5353)
+- **DNS Inmutable:** Bloquea `/etc/resolv.conf` con atributo inmutable (`chattr +i`)
+- **Aislamiento de Procesos:** Solo el proceso Tor (usuario `debian-tor`) puede hacer conexiones directas
+- **Sin Fugas:** Todo otro tráfico de salida es bloqueado por política DROP predeterminada
 
-```bash
-sudo kalidefender stealth
+### 🔴 Modo Attack - Arsenal Controlado
+- **Apertura Selectiva de Puertos:** Expón solo los puertos que necesitas (configurables)
+- **Detección Automática de C2:** Reconoce si estás en una red privada (Tailscale/ZeroTier)
+- **Restricción Inteligente:** Si hay C2, los puertos solo se abren a esa red privada
+- **Advertencia Explícita:** Si no hay C2, te advierte antes de exponer puertos a Internet
+- **Fail2Ban Integrado:** Protege tus puertos expuestos de ataques de fuerza bruta
+
+### 🖥️ Dashboard Web Seguro
+- **API REST segura** con autenticación por token Bearer
+- **HTTPS** con certificado autofirmado generado automáticamente
+- **Solo localhost:** El dashboard solo escucha en `127.0.0.1` por seguridad
+- **Whitelist de acciones:** Solo permite comandos predefinidos (stealth, attack, status)
+- **Endpoints:**
+  - `GET /api/status` - Obtener estado del sistema
+  - `POST /api/action` - Cambiar modo de operación
+
+### 📦 Sistema de Backups
+- Backup completo de reglas iptables (IPv4 e IPv6)
+- Respaldo del estado del sistema
+- Copia de configuraciones críticas (Tor, DNS)
+- Restauración atómica y verificada
+
+### 🛡️ Seguridad Adicional
+- **AppArmor:** Perfiles de seguridad para herramientas de pentesting
+- **Fail2Ban:** Baneo automático de IPs que intenten conexiones no autorizadas
+- **Logging estructurado:** Soporte para formato JSON (integración SIEM)
+- **Aplicación atómica de firewall:** Usa `iptables-restore` para cambios instantáneos
+- **Validación de entrada:** Whitelist de acciones en dashboard y CLI
+
+---
+
+## 🏗️ Arquitectura del Sistema
+
+### Estructura de Archivos del Proyecto
