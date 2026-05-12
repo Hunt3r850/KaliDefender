@@ -102,3 +102,119 @@ En operaciones de seguridad ofensiva, el contexto es crítico. Necesitas dos per
 ## 🏗️ Arquitectura del Sistema
 
 ### Estructura de Archivos del Proyecto
+
+KaliDefender/
+├── README.md # Documentación principal
+├── CHANGELOG.md # Historial de cambios
+├── GUIDE.md # Guía de uso detallada
+├── INSTALL.md # Instrucciones de instalación
+├── UNINSTALL.md # Desinstalación completa
+├── LICENSE # Licencia MIT
+├── kalidefender.sh # Script principal (CLI)
+├── kalidefender_uninstall.sh # Script de desinstalación
+└── hybrid_net_manager.py # Dashboard web (Python)
+
+###  Estructura en el Sistema
+
+/etc/kalidefender/ # Directorio principal de configuración
+├── config/
+│ └── defaults.conf # Configuración centralizada
+├── state/ # Estado del sistema en tiempo real
+│ ├── mode # Modo actual (stealth/attack)
+│ ├── c2_provider # Proveedor C2 detectado
+│ └── c2_subnet # Subred C2
+├── backups/ # Backups del sistema
+│ └── kalidefender_backup_YYYYMMDD_HHMMSS/
+│ ├── iptables.rules
+│ ├── ip6tables.rules
+│ ├── state/
+│ ├── resolv.conf
+│ └── torrc
+├── certs/ # Certificados SSL para dashboard
+│ ├── dashboard.pem
+│ └── dashboard.key
+└── logs/
+└── kalidefender.log # Log estructurado del sistema
+
+/usr/local/bin/kalidefender # Ejecutable principal
+
+/etc/systemd/system/
+└── kalidefender.service # Servicio systemd para auto-inicio
+
+### Diagrama de Flujo de Modos
+
+┌─────────────────────────────────────────────────────────────┐
+│ KALIDEFENDER v6.0.0 │
+└─────────────────────────────────────────────────────────────┘
+│
+┌─────────┴─────────┐
+│ ¿Modo Actual? │
+└─────────┬─────────┘
+│
+┌───────────────┴───────────────┐
+│ │
+┌─────▼─────┐ ┌─────▼─────┐
+│ STEALTH │ │ ATTACK │
+└─────┬─────┘ └─────┬─────┘
+│ │
+┌─────────┼─────────┐ ┌─────────┼─────────┐
+│ │ │ │ │ │
+▼ ▼ ▼ ▼ ▼ ▼
+Tor Firewall DNS Firewall C2 Puertos
+Proxy DROP Seguro Selectivo Detect Abiertos
+
+### Principios de Diseño
+
+1. **Modularidad:** Cada función es independiente y testeable
+2. **Atomicidad:** Los cambios de firewall son instantáneos (iptables-restore)
+3. **Idempotencia:** Ejecutar el mismo comando múltiples veces produce el mismo resultado
+4. **Fail-Safe:** Si algo falla, el sistema vuelve a un estado seguro conocido
+5. **Trazabilidad:** Cada acción queda registrada en logs estructurados
+
+---
+
+## 📦 Instalación
+
+### Requisitos Previos
+
+- **Sistema Operativo:** Kali Linux 2023.1 o superior
+- **Arquitectura:** x86_64 / amd64
+- **RAM:** 512 MB mínimo (2 GB recomendado)
+- **Disco:** 100 MB libres (500 MB recomendado)
+- **Privilegios:** Acceso root (sudo)
+- **Red:** Conexión a Internet para instalación inicial
+
+### Instalación Rápida (3 Pasos)
+
+```bash
+# 1. Clonar el repositorio
+git clone https://github.com/Hunt3r850/KaliDefender.git
+cd KaliDefender
+
+# 2. Dar permisos de ejecución a los scripts
+chmod +x *.sh
+
+# 3. Instalar (requiere sudo)
+sudo ./kalidefender.sh install
+
+¡Listo! KaliDefender está activo en Modo Stealth por defecto.
+
+¿Qué hace la instalación?
+✅ Verifica que el sistema sea compatible (Kali Linux, dependencias)
+
+✅ Instala todas las dependencias necesarias (Tor, Fail2Ban, AppArmor, etc.)
+
+✅ Configura Tor con TransProxy (puerto 9040) y DNSPort (puerto 5353)
+
+✅ Configura Fail2Ban con reglas personalizadas para KaliDefender
+
+✅ Instala perfiles de AppArmor para herramientas de pentesting
+
+✅ Crea el servicio systemd para inicio automático
+
+✅ Configura DNS inmutable en modo stealth
+
+✅ Activa el Modo Stealth por defecto
+
+✅ Copia el ejecutable a /usr/local/bin/kalidefender
+
