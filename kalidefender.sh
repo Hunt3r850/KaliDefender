@@ -1,135 +1,415 @@
 #!/bin/bash
-# KaliDefender v5.1.0 - Sistema Dual Stealth/Attack para Pentesters Profesionales
+# KaliDefender v6.0.0 - Sistema Modular de Perfilado de Red
 # Autor: Hunt3r850
 # Licencia: MIT
-# Características Enterprise: WireGuard, Cobalt Strike, Dashboard Web, SIEM, Multi-Interfaz
+# Arquitectura: Modular, Segura, Atómica
 
 set -euo pipefail
 
-# ==================== CONFIGURACIÓN ====================
-LOG_FILE="/var/log/kalidefender.log"
-CONFIG_DIR="/etc/kalidefender"
-MODE_FILE="$CONFIG_DIR/mode"
-BACKUP_DIR="$CONFIG_DIR/backups"
-WIREDIR="$CONFIG_DIR/wireguard"
-COBALT_DIR="$CONFIG_DIR/cobaltstrike"
-SIEM_SOCKET="/var/run/kalidefender-siem.sock"
-DASHBOARD_PORT="${KALIDEFENDER_DASHBOARD_PORT:-8443}"
+# ==================== CONFIGURACIÓN GLOBAL ====================
+readonly KALI_VERSION="6.0.0"
+readonly BASE_DIR="/etc/kalidefender"
+readonly LIB_DIR="${BASE_DIR}/lib"
+readonly STATE_DIR="${BASE_DIR}/state"
+readonly CONFIG_DIR="${BASE_DIR}/config"
+readonly BACKUP_DIR="${BASE_DIR}/backups"
+readonly LOG_FILE="/var/log/kalidefender.log"
 
-# Puertos configurables (pueden modificarse según necesidades)
+# Cargar configuración por defecto
+[[ -f "${CONFIG_DIR}/defaults.conf" ]] && source "${CONFIG_DIR}/defaults.conf"
+
+# Configuración con valores por defecto
 ATTACK_TCP_PORTS="${KALIDEFENDER_TCP_PORTS:-22,80,443,4444,5555,8080}"
 ATTACK_UDP_PORTS="${KALIDEFENDER_UDP_PORTS:-53,1194}"
-
-# Fail2Ban configuración
 FAIL2BAN_BANTIME="${KALIDEFENDER_BANTIME:-24h}"
 FAIL2BAN_MAXRETRY="${KALIDEFENDER_MAXRETRY:-3}"
+DASHBOARD_PORT="${KALIDEFENDER_DASHBOARD_PORT:-8443}"
+DASHBOARD_AUTH_TOKEN="${KALIDEFENDER_AUTH_TOKEN:-}"
 
-# Interfaces de red soportadas
-SUPPORTED_INTERFACES=("eth" "wlan" "en" "wl")
+# ==================== UTILIDADES CORE ====================
 
-# ==================== UTILIDADES ====================
-
+# Sistema de logging estructurado
 log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
+    local level="${1:-INFO}"
+    local message="${2:-}"
+    local timestamp
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    
+    # Formato JSON para integración SIEM
+    if [[ "${LOG_FORMAT:-}" == "json" ]]; then
+        echo "{\"timestamp\":\"$timestamp\",\"level\":\"$level\",\"message\":\"$message\",\"component\":\"${FUNCNAME[1]:-main}\"}" >> "$LOG_FILE"
+    else
+        echo "[$timestamp] [$level] $message" | tee -a "$LOG_FILE"
+    fi
 }
 
+# Verificación de root mejorada
 check_root() {
     if [[ $EUID -ne 0 ]]; then
-        echo "❌ Error: Este script requiere privilegios de superusuario (sudo)." >&2
+        log "ERROR" "Este script requiere privilegios de superusuario (sudo)"
         exit 1
     fi
 }
 
-get_user_uid() {
-    local user=${SUDO_USER:-$(whoami)}
-    id -u "$user"
-}
-
-# Verifica si un comando existe
-command_exists() {
-    command -v "$1" &>/dev/null
-}
-
-# Verifica dependencias críticas del sistema
-check_system_dependencies() {
-    local missing_deps=()
+# Verificación de dependencias robusta
+check_dependency() {
+    local cmd="$1"
+    local package="${2:-$cmd}"
     
-    if ! command_exists apt; then
-        log "❌ Error: apt no está disponible. Este sistema no es compatible."
-        exit 1
-    fi
-    
-    for cmd in iptables ip6tables systemctl curl; do
-        if ! command_exists "$cmd"; then
-            missing_deps+=("$cmd")
+    if ! command -v "$cmd" &>/dev/null; then
+        log "WARNING" "Comando '$cmd' no encontrado. Intentando instalar $package..."
+        if apt install -y -qq "$package" 2>/dev/null; then
+            log "INFO" "$package instalado correctamente"
+            return 0
+        else
+            log "ERROR" "No se pudo instalar $package"
+            return 1
         fi
+    fi
+    return 0
+}
+
+# Validación de entrada segura
+validate_action() {
+    local action="$1"
+    local allowed_actions=("stealth" "attack" "toggle" "status" "backup" "restore" "help")
+    
+    for allowed in "${allowed_actions[@]}"; do
+        [[ "$action" == "$allowed" ]] && return 0
+    done
+    return 1
+}
+
+# Gestión de estado del sistema
+get_state() {
+    local key="$1"
+    local state_file="${STATE_DIR}/${key}"
+    
+    if [[ -f "$state_file" ]]; then
+        cat "$state_file"
+    else
+        echo "unknown"
+    fi
+}
+
+set_state() {
+    local key="$1"
+    local value="$2"
+    
+    mkdir -p "$STATE_DIR"
+    echo "$value" > "${STATE_DIR}/${key}"
+    log "DEBUG" "Estado actualizado: $key = $value"
+}
+
+# ==================== MÓDULO DE FIREWALL ====================
+
+# Aplicación atómica de reglas iptables
+firewall_apply_atomic() {
+    local rules_file="${STATE_DIR}/iptables.rules"
+    
+    log "INFO" "Aplicando reglas de firewall de forma atómica..."
+    
+    # Generar archivo de reglas completo
+    cat > "$rules_file" << 'EOF'
+*filter
+:INPUT DROP [0:0]
+:FORWARD DROP [0:0]
+:OUTPUT DROP [0:0]
+:KALIDEFENDER-IN - [0:0]
+:KALIDEFENDER-OUT - [0:0]
+:KALIDEFENDER-FAIL2BAN - [0:0]
+
+# Loopback
+-A INPUT -i lo -j ACCEPT
+-A OUTPUT -o lo -j ACCEPT
+
+# Conexiones establecidas
+-A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+-A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+
+# DHCP
+-A OUTPUT -p udp --sport 68 --dport 67 -j ACCEPT
+-A INPUT -p udp --sport 67 --dport 68 -j ACCEPT
+
+# Cadenas personalizadas
+-A INPUT -j KALIDEFENDER-IN
+-A OUTPUT -j KALIDEFENDER-OUT
+
+# Fail2Ban chain
+-A INPUT -j KALIDEFENDER-FAIL2BAN
+
+COMMIT
+
+*nat
+:PREROUTING ACCEPT [0:0]
+:INPUT ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+:POSTROUTING ACCEPT [0:0]
+COMMIT
+EOF
+
+    # Aplicar reglas de forma atómica
+    if iptables-restore < "$rules_file" 2>/dev/null; then
+        log "INFO" "Firewall aplicado exitosamente"
+        return 0
+    else
+        log "ERROR" "Error al aplicar reglas de firewall"
+        return 1
+    fi
+}
+
+# Configuración específica del modo
+firewall_configure_mode() {
+    local mode="$1"
+    local rules_file="${STATE_DIR}/iptables.rules"
+    
+    case "$mode" in
+        stealth)
+            # Agregar reglas de Tor
+            sed -i '/KALIDEFENDER-OUT/a -A KALIDEFENDER-OUT -m owner --uid-owner debian-tor -j ACCEPT' "$rules_file"
+            ;;
+        attack)
+            # Agregar reglas de ataque
+            local uid
+            uid=$(get_user_uid)
+            sed -i "/KALIDEFENDER-OUT/a -A KALIDEFENDER-OUT -m owner --uid-owner $uid -j ACCEPT" "$rules_file"
+            sed -i '/KALIDEFENDER-OUT/a -A KALIDEFENDER-OUT -m owner --uid-owner 0 -j ACCEPT' "$rules_file"
+            ;;
+    esac
+    
+    firewall_apply_atomic
+}
+
+# ==================== MÓDULO DE MODOS ====================
+
+mode_stealth() {
+    log "INFO" "🦊 Activando Modo Stealth - Privacidad Total"
+    
+    # Verificar que Tor esté instalado y funcionando
+    if ! systemctl is-active --quiet tor; then
+        log "WARNING" "Tor no está activo. Intentando iniciar..."
+        systemctl start tor || {
+            log "ERROR" "No se pudo iniciar Tor"
+            return 1
+        }
+    fi
+    
+    # Configurar firewall para modo stealth
+    firewall_configure_mode "stealth"
+    
+    # Configurar DNS seguro (inmutable)
+    configure_secure_dns
+    
+    # Configurar transproxy de Tor
+    configure_tor_transproxy
+    
+    set_state "mode" "stealth"
+    log "INFO" "✅ Modo Stealth activado correctamente"
+}
+
+mode_attack() {
+    log "INFO" "⚔️ Activando Modo Attack - Pentesting Controlado"
+    
+    # Detectar red C2
+    detect_c2_network
+    
+    # Configurar firewall para modo attack
+    firewall_configure_mode "attack"
+    
+    # Abrir puertos según configuración
+    open_attack_ports
+    
+    # Restaurar DNS público
+    restore_public_dns
+    
+    set_state "mode" "attack"
+    log "INFO" "✅ Modo Attack activado correctamente"
+}
+
+# ==================== MÓDULO DE RED C2 ====================
+
+detect_c2_network() {
+    local c2_detected="none"
+    local c2_subnet=""
+    
+    # Verificar Tailscale
+    if command -v tailscale &>/dev/null && tailscale status &>/dev/null; then
+        c2_detected="tailscale"
+        c2_subnet="100.64.0.0/10"  # Rango por defecto de Tailscale
+        log "INFO" "🔐 Red C2 detectada: Tailscale"
+        
+    # Verificar ZeroTier
+    elif command -v zerotier-cli &>/dev/null; then
+        local zt_status
+        zt_status=$(zerotier-cli info 2>/dev/null || echo "")
+        
+        if [[ "$zt_status" == *"ONLINE"* ]]; then
+            c2_detected="zerotier"
+            # Obtener subredes de ZeroTier
+            local zt_networks
+            zt_networks=$(zerotier-cli listnetworks -j 2>/dev/null | grep -oP '(?<="routes":\[).*?(?=\])' | grep -oP '\d+\.\d+\.\d+\.\d+/\d+' | head -1 || echo "")
+            c2_subnet="${zt_networks:-10.0.0.0/8}"
+            log "INFO" "🔐 Red C2 detectada: ZeroTier ($c2_subnet)"
+        fi
+    fi
+    
+    set_state "c2_provider" "$c2_detected"
+    set_state "c2_subnet" "$c2_subnet"
+    
+    if [[ "$c2_detected" == "none" ]]; then
+        log "WARNING" "⚠️ Sin red C2 detectada - Los puertos se expondrán a Internet"
+        echo "⚠️ ADVERTENCIA: Sin red privada C2. ¿Desea continuar? (s/N):"
+        read -r response
+        [[ "$response" =~ ^[Ss]$ ]] || exit 1
+    fi
+}
+
+open_attack_ports() {
+    local c2_subnet
+    c2_subnet=$(get_state "c2_subnet")
+    
+    log "INFO" "Abriendo puertos de ataque..."
+    
+    # Puerto de dashboard (siempre con restricción si hay C2)
+    if [[ -n "$c2_subnet" && "$c2_subnet" != "none" ]]; then
+        iptables -A KALIDEFENDER-IN -s "$c2_subnet" -p tcp --dport "$DASHBOARD_PORT" -j ACCEPT
+    else
+        iptables -A KALIDEFENDER-IN -p tcp --dport "$DASHBOARD_PORT" -j ACCEPT
+    fi
+    
+    # Puertos TCP de ataque
+    IFS=',' read -ra TCP_PORTS <<< "$ATTACK_TCP_PORTS"
+    for port in "${TCP_PORTS[@]}"; do
+        if [[ -n "$c2_subnet" && "$c2_subnet" != "none" ]]; then
+            iptables -A KALIDEFENDER-IN -s "$c2_subnet" -p tcp --dport "$port" -j ACCEPT
+        else
+            iptables -A KALIDEFENDER-IN -p tcp --dport "$port" -m conntrack --ctstate NEW -j ACCEPT
+        fi
+        log "DEBUG" "Puerto TCP $port abierto"
     done
     
-    if [[ ${#missing_deps[@]} -gt 0 ]]; then
-        log "⚠️ Advertencia: Faltan comandos críticos: ${missing_deps[*]}"
-    fi
+    # Puertos UDP de ataque
+    IFS=',' read -ra UDP_PORTS <<< "$ATTACK_UDP_PORTS"
+    for port in "${UDP_PORTS[@]}"; do
+        if [[ -n "$c2_subnet" && "$c2_subnet" != "none" ]]; then
+            iptables -A KALIDEFENDER-IN -s "$c2_subnet" -p udp --dport "$port" -j ACCEPT
+        else
+            iptables -A KALIDEFENDER-IN -p udp --dport "$port" -j ACCEPT
+        fi
+        log "DEBUG" "Puerto UDP $port abierto"
+    done
 }
 
-# Crea backup de configuración actual
-create_backup() {
-    local backup_name="kalidefender_backup_$(date +%Y%m%d_%H%M%S)"
-    mkdir -p "$BACKUP_DIR"
-    
-    # Backup de reglas iptables actuales
-    iptables-save > "$BACKUP_DIR/${backup_name}_iptables.rules" 2>/dev/null || true
-    ip6tables-save > "$BACKUP_DIR/${backup_name}_ip6tables.rules" 2>/dev/null || true
-    
-    # Backup de modo actual
-    if [[ -f "$MODE_FILE" ]]; then
-        cp "$MODE_FILE" "$BACKUP_DIR/${backup_name}_mode"
-    fi
-    
-    # Backup de resolv.conf
-    cp /etc/resolv.conf "$BACKUP_DIR/${backup_name}_resolv.conf" 2>/dev/null || true
-    
-    log "✅ Backup creado: $backup_name"
-    echo "$backup_name"
-}
+# ==================== MÓDULO DE TOR ====================
 
-# Restaura configuración desde backup
-restore_backup() {
-    local backup_name="$1"
-    local backup_path="$BACKUP_DIR/$backup_name"
+configure_tor_transproxy() {
+    log "INFO" "Configurando Tor TransProxy..."
     
-    if [[ ! -d "$BACKUP_DIR" ]] || [[ ! -f "${backup_path}_iptables.rules" ]]; then
-        log "❌ Error: Backup '$backup_name' no encontrado."
+    # Verificar que el usuario debian-tor existe
+    if ! id -u debian-tor &>/dev/null; then
+        log "ERROR" "Usuario debian-tor no encontrado"
         return 1
     fi
     
-    log "🔄 Restaurando backup: $backup_name"
-    iptables-restore < "${backup_path}_iptables.rules" || true
-    ip6tables-restore < "${backup_path}_ip6tables.rules" || true
-    
-    if [[ -f "${backup_path}_mode" ]]; then
-        cp "${backup_path}_mode" "$MODE_FILE"
+    # Asegurar que Tor esté configurado correctamente
+    if [[ -f /etc/tor/torrc ]]; then
+        # Backup de la configuración actual
+        cp /etc/tor/torrc "/etc/tor/torrc.backup.$(date +%Y%m%d_%H%M%S)"
+        
+        # Configurar Tor para TransProxy
+        cat >> /etc/tor/torrc << 'EOF'
+
+# KaliDefender TransProxy Configuration
+VirtualAddrNetworkIPv4 10.192.0.0/10
+AutomapHostsOnResolve 1
+TransPort 9040
+DNSPort 5353
+AvoidDiskWrites 1
+EOF
+        
+        # Reiniciar Tor
+        systemctl restart tor
+        
+        # Esperar a que Tor esté listo
+        sleep 3
+        
+        # Verificar que Tor está funcionando
+        if ! systemctl is-active --quiet tor; then
+            log "ERROR" "Tor no se inició correctamente"
+            return 1
+        fi
     fi
     
-    if [[ -f "${backup_path}_resolv.conf" ]]; then
-        chattr -i /etc/resolv.conf 2>/dev/null || true
-        cp "${backup_path}_resolv.conf" /etc/resolv.conf
-    fi
+    # Configurar redirección de tráfico
+    iptables -t nat -A OUTPUT -p tcp -m owner ! --uid-owner debian-tor -j REDIRECT --to-ports 9040
+    iptables -t nat -A OUTPUT -p udp --dport 53 -j REDIRECT --to-ports 5353
     
-    log "✅ Backup restaurado correctamente."
+    log "INFO" "TransProxy de Tor configurado correctamente"
 }
 
-# Lista backups disponibles
-list_backups() {
-    if [[ ! -d "$BACKUP_DIR" ]]; then
-        echo "No hay backups disponibles."
-        return
-    fi
+# ==================== MÓDULO DE SEGURIDAD ====================
+
+configure_secure_dns() {
+    log "INFO" "Configurando DNS seguro..."
     
-    echo "📦 Backups disponibles:"
-    ls -1 "$BACKUP_DIR" | sed 's/_iptables.rules$//' | sort -u | while read -r backup; do
-        echo "  - $backup"
-    done
+    # Hacer resolv.conf inmutable
+    chattr -i /etc/resolv.conf 2>/dev/null || true
+    echo "nameserver 127.0.0.1" > /etc/resolv.conf
+    chattr +i /etc/resolv.conf 2>/dev/null || true
+    
+    log "INFO" "DNS configurado para usar Tor (127.0.0.1)"
 }
 
+restore_public_dns() {
+    log "INFO" "Restaurando DNS público..."
+    
+    chattr -i /etc/resolv.conf 2>/dev/null || true
+    cat > /etc/resolv.conf << EOF
+nameserver 1.1.1.1
+nameserver 8.8.8.8
+nameserver 8.8.4.4
+EOF
+    
+    log "INFO" "DNS público restaurado"
+}
+
+# ==================== MÓDULO FAIL2BAN ====================
+
+configure_fail2ban() {
+    log "INFO" "Configurando Fail2Ban adaptativo..."
+    
+    # Crear filtro personalizado
+    cat > /etc/fail2ban/filter.d/kalidefender.conf << 'EOF'
+[Definition]
+failregex = ^.*KALIDEFENDER-FAIL2BAN:.*SRC=<HOST>.*
+ignoreregex =
+EOF
+    
+    # Configurar jail
+    cat > /etc/fail2ban/jail.d/kalidefender.local << EOF
+[kalidefender]
+enabled = true
+filter = kalidefender
+logpath = /var/log/kern.log
+maxretry = ${FAIL2BAN_MAXRETRY}
+bantime = ${FAIL2BAN_BANTIME}
+findtime = 1h
+action = iptables-multiport[name=KaliDefender, port="ssh,http,https", protocol=tcp]
+EOF
+    
+    # Reiniciar Fail2Ban
+    systemctl restart fail2ban
+    
+    # Verificar estado
+    if systemctl is-active --quiet fail2ban; then
+        log "INFO" "Fail2Ban configurado y activo"
+    else
+        log "ERROR" "Fail2Ban no pudo iniciarse"
+        return 1
+    fi
+}
+
+# ==================== CARACTERÍSTICAS ENTERPRISE ====================
 # ==================== APPARMOR ====================
 
 install_apparmor_profiles() {
@@ -255,529 +535,6 @@ EOF
     fi
 }
 
-# ==================== RED C2 ====================
-
-detect_c2_subnet() {
-    C2_PROVIDER="none"
-    C2_SUBNET=""
-    
-    if command_exists tailscale && tailscale status &>/dev/null; then
-        C2_PROVIDER="tailscale"
-        local ts_ip
-        ts_ip=$(tailscale ip -4 2>/dev/null | head -n1)
-        if [[ -n "$ts_ip" ]]; then
-            C2_SUBNET="$ts_ip/32"
-            log "🔎 Red C2 detectada: Tailscale ($C2_SUBNET)"
-        fi
-    elif command_exists zerotier-cli; then
-        local zt_status
-        zt_status=$(zerotier-cli info -j 2>/dev/null || echo "{}")
-        
-        # Validar JSON y estado OK
-        if echo "$zt_status" | grep -q '"status":"OK"' || echo "$zt_status" | grep -q '"status": "OK"'; then
-            C2_PROVIDER="zerotier"
-            local zt_networks
-            zt_networks=$(zerotier-cli listnetworks -j 2>/dev/null || echo "[]")
-            
-            # Extraer subnet válida con mejor parsing
-            C2_SUBNET=$(echo "$zt_networks" | grep -oE '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}' | head -n1 || echo "")
-            
-            if [[ -n "$C2_SUBNET" ]]; then
-                log "🔎 Red C2 detectada: ZeroTier ($C2_SUBNET)"
-            else
-                log "⚠️ ZeroTier activo pero no se pudo determinar la subnet"
-                C2_SUBNET=""
-            fi
-        fi
-    fi
-    
-    if [[ "$C2_PROVIDER" == "none" || -z "$C2_SUBNET" ]]; then
-        log "ℹ️ Sin red C2 privada activa. Los puertos de ataque serán públicos."
-    fi
-}
-
-# ==================== FIREWALL BASE ====================
-
-firewall_base() {
-    log "🧱 Aplicando reglas base de firewall..."
-
-    # Limpiar reglas existentes
-    iptables -F; iptables -X; iptables -t nat -F; iptables -t nat -X
-    ip6tables -F; ip6tables -X
-
-    # Políticas por defecto
-    iptables -P INPUT DROP
-    iptables -P OUTPUT DROP
-    iptables -P FORWARD DROP
-    ip6tables -P INPUT DROP
-    ip6tables -P OUTPUT DROP
-    ip6tables -P FORWARD DROP
-
-    # Permitir tráfico local
-    iptables -A INPUT -i lo -j ACCEPT
-    iptables -A OUTPUT -o lo -j ACCEPT
-
-    # Permitir conexiones establecidas
-    iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-    iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-
-    # Permitir DHCP
-    iptables -A OUTPUT -p udp --sport 68 --dport 67 -j ACCEPT
-    iptables -A INPUT -p udp --sport 67 --dport 68 -j ACCEPT
-
-    # --- PERMITIR TRÁFICO DE CONTROL DE VPNs ---
-    # Tailscale (UDP 41641 y otros)
-    iptables -A OUTPUT -p udp --dport 41641 -j ACCEPT
-    iptables -A INPUT -p udp --sport 41641 -j ACCEPT
-    # ZeroTier (UDP 9993)
-    iptables -A OUTPUT -p udp --dport 9993 -j ACCEPT
-    iptables -A INPUT -p udp --sport 9993 -j ACCEPT
-    # STUN/ICE para VPNs
-    iptables -A OUTPUT -p udp --dport 3478 -j ACCEPT
-
-    # Limitar SYN y ICMP para evitar flooding
-    iptables -A INPUT -p tcp --syn -m limit --limit 2/sec --limit-burst 5 -j ACCEPT
-    iptables -A INPUT -p icmp --icmp-type echo-request -m limit --limit 1/sec -j ACCEPT
-
-    # Loguear paquetes dropeados
-    iptables -A INPUT -m limit --limit 5/min -j LOG --log-prefix "KALIDEFENDER-DROP: "
-}
-
-# ==================== MODO STEALTH ====================
-
-mode_stealth() {
-    log "🥷 Activando Modo Stealth: Privacidad total + Tor"
-
-    firewall_base
-
-    # 1. Validar y obtener UID de debian-tor de forma segura
-    local tor_uid=""
-    if id -u debian-tor &>/dev/null; then
-        tor_uid=$(id -u debian-tor)
-        log "✅ Usuario debian-tor encontrado (UID: $tor_uid)"
-    else
-        log "❌ Error: Usuario debian-tor no encontrado. ¿Está Tor instalado?"
-        return 1
-    fi
-    
-    # Permitir tráfico de salida para Tor
-    iptables -A OUTPUT -m owner --uid-owner "$tor_uid" -j ACCEPT
-
-    # 2. Redirigir DNS a Tor (Puerto 5353)
-    iptables -t nat -A OUTPUT -p udp --dport 53 -j REDIRECT --to-ports 5353
-    iptables -t nat -A OUTPUT -p tcp --dport 53 -j REDIRECT --to-ports 5353
-
-    # 3. Redirigir tráfico TCP a Tor (TransPort 9040)
-    # Exceptuamos tráfico local y el propio tráfico de Tor
-    iptables -t nat -A OUTPUT -d 127.0.0.0/8 -j RETURN
-    iptables -t nat -A OUTPUT -m owner --uid-owner "$tor_uid" -j RETURN
-    iptables -t nat -A OUTPUT -p tcp -j REDIRECT --to-ports 9040
-
-    # 4. Permitir tráfico hacia los puertos de Tor
-    iptables -A OUTPUT -p tcp --dport 9040 -j ACCEPT
-    iptables -A OUTPUT -p udp --dport 5353 -j ACCEPT
-
-    # 5. ELIMINADO: Ya no permitimos tráfico web directo (previene fugas)
-    # Todo el tráfico debe pasar por Tor
-
-    # Configurar DNS y hacerlo inmutable
-    chattr -i /etc/resolv.conf 2>/dev/null || true
-    echo "nameserver 127.0.0.1" > /etc/resolv.conf
-    chattr +i /etc/resolv.conf 2>/dev/null || true
-
-    echo "stealth" > "$MODE_FILE"
-    log "✅ Modo Stealth activo. Todo el tráfico pasa por Tor."
-}
-
-# ==================== MODO ATTACK ====================
-
-mode_attack() {
-    log "⚔️ Activando Modo Attack: Pentesting con C2 seguro"
-
-    detect_c2_subnet
-    firewall_base
-    iptables -t nat -F
-
-    # Permitir todo el tráfico de salida para el usuario
-    local uid=$(get_user_uid)
-    iptables -A OUTPUT -m owner --uid-owner "$uid" -j ACCEPT
-    iptables -A OUTPUT -m owner --uid-owner 0 -j ACCEPT
-
-    # Configurar DNS público
-    chattr -i /etc/resolv.conf 2>/dev/null || true
-    echo "nameserver 1.1.1.1" > /etc/resolv.conf
-    echo "nameserver 8.8.8.8" >> /etc/resolv.conf
-
-    # Abrir puertos de ataque
-    if [[ -n "$C2_SUBNET" && "$C2_SUBNET" != "/32" ]]; then
-        log "🔐 Puertos restringidos a la red $C2_PROVIDER ($C2_SUBNET)"
-        IFS=',' read -ra TCP_PORTS <<< "$ATTACK_TCP_PORTS"
-        for port in "${TCP_PORTS[@]}"; do
-            iptables -A INPUT -s "$C2_SUBNET" -p tcp --dport "$port" -j ACCEPT
-        done
-        IFS=',' read -ra UDP_PORTS <<< "$ATTACK_UDP_PORTS"
-        for port in "${UDP_PORTS[@]}"; do
-            iptables -A INPUT -s "$C2_SUBNET" -p udp --dport "$port" -j ACCEPT
-        done
-    else
-        log "⚠️ ADVERTENCIA: Sin red C2 privada activa. Abriendo puertos a TODO Internet."
-        IFS=',' read -ra TCP_PORTS <<< "$ATTACK_TCP_PORTS"
-        for port in "${TCP_PORTS[@]}"; do iptables -A INPUT -p tcp --dport "$port" -j ACCEPT; done
-        IFS=',' read -ra UDP_PORTS <<< "$ATTACK_UDP_PORTS"
-        for port in "${UDP_PORTS[@]}"; do iptables -A INPUT -p udp --dport "$port" -j ACCEPT; done
-    fi
-
-    echo "attack" > "$MODE_FILE"
-    log "✅ Modo Attack activo."
-}
-
-# ==================== INSTALACIÓN ====================
-
-install_dependencies() {
-    log "📦 Instalando dependencias..."
-    apt update -qq || true
-    apt install -y -qq iptables-persistent fail2ban tor tor-geoipdb resolvconf macchanger apparmor apparmor-utils curl
-}
-
-configure_tor_dns() {
-    log "🧅 Configurando Tor para DNS y TransPort..."
-    if [[ -f /etc/tor/torrc ]]; then
-        # Limpiar configuraciones previas de KaliDefender
-        sed -i '/# KaliDefender Config/,$d' /etc/tor/torrc
-        
-        cat >> /etc/tor/torrc <<EOF
-
-# KaliDefender Config
-VirtualAddrNetworkIPv4 10.192.0.0/10
-AutomapHostsOnResolve 1
-TransPort 9040
-DNSPort 5353
-AvoidDiskWrites 1
-EOF
-        systemctl restart tor || true
-    else
-        log "⚠️ Archivo /etc/tor/torrc no encontrado."
-    fi
-}
-
-configure_mac_randomization() {
-    log "📡 Configurando aleatorización de MAC..."
-    mkdir -p /etc/NetworkManager/conf.d/
-    cat > /etc/NetworkManager/conf.d/00-macrandomize.conf <<EOF
-[device]
-wifi.scan-rand-mac-address=yes
-
-[connection]
-wifi.cloned-mac-address=random
-ethernet.cloned-mac-address=random
-EOF
-    systemctl restart NetworkManager || true
-}
-
-configure_fail2ban() {
-    log "🛡️ Configurando Fail2Ban..."
-    cat > /etc/fail2ban/filter.d/kalidefender.conf <<'EOF'
-[Definition]
-failregex = ^.*KALIDEFENDER-DROP:.*SRC=<HOST>
-ignoreregex =
-EOF
-
-    cat > /etc/fail2ban/jail.d/kalidefender.local <<EOF
-[kalidefender]
-enabled = true
-filter = kalidefender
-logpath = /var/log/kern.log
-maxretry = $FAIL2BAN_MAXRETRY
-bantime = $FAIL2BAN_BANTIME
-findtime = 1h
-action = iptables-multiport[name=KaliDefender, port="ssh,http,https", protocol=tcp]
-EOF
-    
-    # Asegurar que el log exista
-    touch /var/log/kern.log 2>/dev/null || true
-    
-    systemctl restart fail2ban || true
-    log "✅ Fail2Ban configurado (maxretry=$FAIL2BAN_MAXRETRY, bantime=$FAIL2BAN_BANTIME)"
-}
-
-install_secure_c2() {
-    echo
-    read -p "🔧 ¿Deseas configurar una red C2 segura (Tailscale/ZeroTier)? [S/n] " choice
-    case "$choice" in
-        n|N) log "Instalación de C2 omitida."; return ;; 
-    esac
-
-    echo "  t) Tailscale (Recomendado - Split Tunnel automático)"
-    echo "  z) ZeroTier (Split Tunnel automático)"
-    read -p "Elige una opción: " c2_choice
-
-    case "$c2_choice" in
-        t)  log "Instalando Tailscale..."
-            curl -fsSL https://tailscale.com/install.sh | sh || true
-            log "⚙️ Configurando Tailscale para evitar pérdida de conexión..."
-            echo "📌 ¡Acción requerida! Ejecuta: sudo tailscale up --accept-dns=false --accept-routes=false"
-            ;;
-        z)  log "Instalando ZeroTier..."
-            curl -s https://install.zerotier.com | sudo bash || true
-            read -p "Introduce tu Network ID de ZeroTier: " nid
-            log "⚙️ Uniendo a red ZeroTier $nid..."
-            zerotier-cli join "$nid" || true
-            log "✅ ZeroTier configurado como split-tunnel por defecto."
-            ;;
-        *) log "Opción no válida. Omitiendo instalación de C2.";;
-    esac
-}
-
-install_all() {
-    log "🚀 Iniciando instalación de KaliDefender v5.0.0..."
-    
-    # Verificar dependencias del sistema primero
-    check_system_dependencies
-    
-    mkdir -p "$CONFIG_DIR"
-    mkdir -p "$BACKUP_DIR"
-    touch "$LOG_FILE"
-    chmod 644 "$LOG_FILE"
-
-    install_dependencies
-    configure_tor_dns
-    configure_mac_randomization
-    configure_fail2ban
-    install_apparmor_metasploit
-    install_secure_c2
-
-    cp "$0" /usr/local/bin/kalidefender.sh
-    chmod +x /usr/local/bin/kalidefender.sh
-
-    cat > /etc/systemd/system/kalidefender.service <<'EOF'
-[Unit]
-Description=KaliDefender v5.0.0 - Sistema Dual Stealth/Attack
-After=network.target tor.service tailscaled.service zerotier-one.service
-Wants=tor.service
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/kalidefender.sh start
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-    systemctl daemon-reload || true
-    systemctl enable kalidefender.service || true
-
-    mode_stealth
-
-    log "✅ Instalación completa. KaliDefender v5.0.0 activo en Modo Stealth."
-    echo "📌 Usa: sudo kalidefender.sh {stealth|attack|toggle|status|backup|restore|help}"
-}
-
-# ==================== GESTIÓN ====================
-
-mode_toggle() {
-    if [[ -f "$MODE_FILE" && "$(cat "$MODE_FILE")" == "stealth" ]]; then
-        mode_attack
-    else
-        mode_stealth
-    fi
-}
-
-mode_status() {
-    local current_mode="UNKNOWN"
-    local json_output=false
-    
-    # Detectar si se pide output JSON
-    if [[ "${2:-}" == "--json" ]]; then
-        json_output=true
-    fi
-    
-    if [[ -f "$MODE_FILE" ]]; then
-        current_mode=$(cat "$MODE_FILE")
-    fi
-    
-    if [[ "$json_output" == true ]]; then
-        # Output en formato JSON para parsing programático
-        local ts_status="inactive"
-        local zt_status="inactive"
-        local ts_ip="null"
-        local zt_networks="[]"
-        
-        if systemctl is-active --quiet tailscaled 2>/dev/null; then
-            ts_status="active"
-            ts_ip="\"$(tailscale ip -4 2>/dev/null | head -n1 || echo 'N/A')\""
-        fi
-        
-        if systemctl is-active --quiet zerotier-one 2>/dev/null; then
-            zt_status="active"
-            zt_networks="$(zerotier-cli listnetworks -j 2>/dev/null | grep -o '"id":"[0-9a-f]\{16\}"' | cut -d'"' -f4 || echo '')"
-        fi
-        
-        cat <<EOF
-{
-  "version": "5.0.0",
-  "mode": "$current_mode",
-  "c2": {
-    "tailscale": {"status": "$ts_status", "ip": $ts_ip},
-    "zerotier": {"status": "$zt_status"}
-  },
-  "apparmor": $(if command_exists aa-status && aa-status | grep -q "msfconsole"; then echo "true"; else echo "false"; fi),
-  "open_ports": $(iptables -L INPUT -n 2>/dev/null | grep -c "ACCEPT" || echo 0)
-}
-EOF
-        return
-    fi
-    
-    # Output humano legible
-    echo "📊 ESTADO DE KALIDEFENDER v5.0.0"
-    echo "=================================="
-    
-    if [[ -f "$MODE_FILE" ]]; then
-        echo "🔷 Modo actual: $(echo "$current_mode" | tr 'a-z' 'A-Z')"
-    else
-        echo "🔷 Modo actual: NO CONFIGURADO"
-    fi
-
-    echo
-    echo "🛡️ AppArmor para Metasploit:"
-    if command_exists aa-status && aa-status --enabled &>/dev/null && aa-status | grep -q "msfconsole"; then
-        echo "  ✅ Activo y perfil cargado"
-    else
-        echo "  ⚠️ Inactivo o no encontrado"
-    fi
-
-    echo
-    echo "🌐 Red C2 Privada:"
-    if systemctl is-active --quiet tailscaled 2>/dev/null; then
-        echo "  ✅ Tailscale activo - IP: $(tailscale ip -4 2>/dev/null | head -n1 || echo 'N/A')"
-    elif systemctl is-active --quiet zerotier-one 2>/dev/null; then
-        local nets
-        nets=$(zerotier-cli listnetworks -j 2>/dev/null | grep -oE '"id":"[0-9a-f]{16}"' | cut -d'"' -f4 | tr '\n' ', ' | sed 's/,$//' || echo "N/A")
-        echo "  ✅ ZeroTier activo - Redes: $nets"
-    else
-        echo "  ❌ No detectada"
-    fi
-
-    echo
-    echo "🔌 Puertos de entrada (INPUT) abiertos:"
-    iptables -L INPUT -n --line-numbers 2>/dev/null | grep ACCEPT | sed 's/^/  /' || echo "  Ninguno"
-
-    echo
-    echo "📡 Test de conectividad a Internet:"
-    # Intentamos a través de Tor si estamos en modo Stealth
-    if [[ "$current_mode" == "stealth" ]]; then
-        if timeout 5 curl --socks5-hostname 127.0.0.1:9050 -s https://httpbin.org/ip &>/dev/null; then
-            echo "  ✅ Conexión exitosa (vía Tor)"
-        else
-            echo "  ❌ Fallo en la conexión (Tor)"
-        fi
-    else
-        if timeout 5 curl -s https://httpbin.org/ip &>/dev/null; then
-            echo "  ✅ Conexión exitosa"
-        else
-            echo "  ❌ Fallo en la conexión"
-        fi
-    fi
-    echo "=================================="
-}
-
-start_service() {
-    if [[ -f "$MODE_FILE" ]]; then
-        local current_mode
-        current_mode=$(cat "$MODE_FILE")
-        if [[ "$current_mode" == "attack" ]]; then
-            mode_attack
-        else
-            mode_stealth
-        fi
-    else
-        mode_stealth
-    fi
-}
-
-# ==================== AYUDA ====================
-
-print_help() {
-    cat <<'EOF'
-    KaliDefender v5.0.0 — Sistema Dual Stealth/Attack para Pentesters
-
-    Uso: sudo kalidefender.sh [COMANDO] [OPCIONES]
-
-    COMANDOS:
-      install           Instala y configura KaliDefender.
-      stealth           Activa el Modo Stealth (privacidad máxima con Tor).
-      attack            Activa el Modo Attack (pentesting con C2 seguro).
-      toggle            Alterna entre los modos Stealth y Attack.
-      status [--json]   Muestra el estado actual (usar --json para output JSON).
-      backup            Crea un backup de la configuración actual.
-      restore <nombre>  Restaura configuración desde un backup.
-      list-backups      Lista todos los backups disponibles.
-      help              Muestra este mensaje de ayuda.
-
-    VARIABLES DE ENTORNO:
-      KALIDEFENDER_TCP_PORTS     Puertos TCP en modo Attack (default: 22,80,443,4444,5555,8080)
-      KALIDEFENDER_UDP_PORTS     Puertos UDP en modo Attack (default: 53,1194)
-      KALIDEFENDER_BANTIME       Tiempo de baneo de Fail2Ban (default: 24h)
-      KALIDEFENDER_MAXRETRY      Intentos máximos antes de banear (default: 3)
-
-    EJEMPLOS:
-      sudo kalidefender.sh install
-      sudo kalidefender.sh stealth
-      sudo kalidefender.sh status --json
-      sudo kalidefender.sh backup
-      sudo kalidefender.sh restore kalidefender_backup_20240101_120000
-      KALIDEFENDER_BANTIME=48h sudo kalidefender.sh install
-
-    Para más detalles, consulta la documentación en GitHub.
-EOF
-}
-
-# ==================== MAIN ====================
-
-main() {
-    check_root
-    
-    case "${1:-help}" in
-        install)      install_all ;;
-        stealth)      mode_stealth ;;
-        attack)       mode_attack ;;
-        toggle)       mode_toggle ;;
-        status)       mode_status "$@" ;;
-        start)        start_service ;;
-        backup)       create_backup ;;
-        restore)      
-            if [[ -z "${2:-}" ]]; then
-                echo "❌ Error: Debes especificar el nombre del backup a restaurar."
-                echo "Usa 'list-backups' para ver los disponibles."
-                exit 1
-            fi
-            restore_backup "$2" 
-            ;;
-        list-backups) list_backups ;;
-        # WireGuard
-        wg-server)    setup_wireguard_server ;;
-        wg-add-client) add_wireguard_client "${2:-}" ;;
-        wg-list)      list_wireguard_clients ;;
-        # Cobalt Strike
-        cobalt-strike) setup_cobalt_strike ;;
-        # SIEM
-        siem)         setup_siem_integration ;;
-        # Multi-interfaz
-        interfaces)   list_network_interfaces ;;
-        randomize-mac) randomize_mac_address "${2:-}" ;;
-        interface-priority) configure_interface_priority ;;
-        # Dashboard
-        dashboard-setup) setup_dashboard ;;
-        dashboard-start) start_dashboard ;;
-        dashboard-stop)  stop_dashboard ;;
-        # AppArmor
-        apparmor)     install_apparmor_profiles ;;
-        help)         print_help ;;
-        *)            echo "Comando no válido." ; print_help ; exit 1 ;;
-    esac
-}
-
-main "$@"
 
 # ==================== WIREGUARD ====================
 
@@ -880,6 +637,7 @@ list_wireguard_clients() {
     wg show wg0 2>/dev/null || echo "⚠️ WireGuard inactivo"
 }
 
+
 # ==================== COBALT STRIKE ====================
 
 setup_cobalt_strike() {
@@ -935,36 +693,6 @@ setup_cobalt_redirector() {
     log "✅ Redirector: 443 -> $ts_ip:$ts_port"
 }
 
-# ==================== SIEM ====================
-
-setup_siem_integration() {
-    log "📊 Integración SIEM..."
-    echo "  1) Socket Unix"
-    echo "  2) Exportar JSON"
-    echo "  3) Syslog forwarding"
-    read -p "Opción: " siem_choice
-    case "$siem_choice" in
-        1) setup_siem_socket ;;
-        2) export_logs_json ;;
-        3) setup_syslog_forwarding ;;
-    esac
-}
-
-setup_siem_socket() {
-    rm -f "$SIEM_SOCKET"
-    log "✅ Socket SIEM: $SIEM_SOCKET (requiere socat)"
-}
-
-export_logs_json() {
-    local output_file="${1:-/var/log/kalidefender_events.json}"
-    log "✅ Exportador JSON activo: $output_file"
-}
-
-setup_syslog_forwarding() {
-    read -p "IP Syslog: " syslog_ip
-    read -p "Puerto (514): " syslog_port; syslog_port="${syslog_port:-514}"
-    log "✅ Syslog forwarding: $syslog_ip:$syslog_port"
-}
 
 # ==================== MULTI-INTERFACE ====================
 
@@ -996,70 +724,416 @@ configure_interface_priority() {
     log "✅ Prioridad: $primary_iface (métrica $metric)"
 }
 
-# ==================== DASHBOARD ====================
 
-setup_dashboard() {
-    log "🖥️ Dashboard Web..."
-    mkdir -p "$CONFIG_DIR/dashboard"
-    ! command_exists python3 && { log "❌ Python3 requerido"; return 1; }
+
+# Lista backups disponibles
+list_backups() {
+    if [[ ! -d "$BACKUP_DIR" ]]; then
+        echo "No hay backups disponibles."
+        return
+    fi
     
-    # Server Python minimal
-    cat > "$CONFIG_DIR/dashboard/server.py" << 'PYEOF'
-#!/usr/bin/env python3
-import http.server, ssl, json, subprocess, os
-from datetime import datetime
-PORT = int(os.environ.get('DASHBOARD_PORT', 8443))
-class Handler(http.server.SimpleHTTPRequestHandler):
-    def do_GET(self):
-        if self.path == '/api/status':
-            try: mode = open('/etc/kalidefender/mode').read().strip()
-            except: mode = 'unknown'
-            self.send_response(200); self.send_header('Content-Type','application/json'); self.end_headers()
-            self.wfile.write(json.dumps({'mode':mode,'timestamp':datetime.now().isoformat(),'version':'5.1.0'}).encode())
-        else: super().do_GET()
-    def do_POST(self):
-        if self.path == '/api/action':
-            length = int(self.headers['ContentLength']); data = json.loads(self.rfile.read(length))
-            action = data.get('action')
-            try: r = subprocess.run(['kalidefender.sh', action], capture_output=True, text=True, timeout=30)
-            except Exception as e: r = type('obj',(object,),{'stdout':'','stderr':str(e)})
-            self.send_response(200); self.send_header('Content-Type','application/json'); self.end_headers()
-            self.wfile.write(json.dumps({'success':True,'output':r.stdout}).encode())
-        else: self.send_error(404)
-    def log_message(self, format, *args): pass
-def main():
-    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    cert,key = '/etc/kalidefender/dashboard/cert.pem','/etc/kalidefender/dashboard/key.pem'
-    if not os.path.exists(cert): subprocess.run(['openssl','req','-x509','-newkey','rsa:4096','-keyout',key,'-out',cert,'-days','365','-nodes','-subj','/CN=KaliDefender'],check=True)
-    ctx.load_cert_chain(cert,key)
-    srv = http.server.HTTPServer(('0.0.0.0',PORT), Handler); srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
-    print(f'Dashboard: https://0.0.0.0:{PORT}'); srv.serve_forever()
-if __name__ == '__main__': main()
-PYEOF
-    chmod +x "$CONFIG_DIR/dashboard/server.py"
-    
-    # HTML minimal
-    cat > "$CONFIG_DIR/dashboard/index.html" << 'HTMLEOF'
-<!DOCTYPE html><html><head><meta charset="UTF-8"><title>KaliDefender v5.1.0</title>
-<style>body{font-family:sans-serif;background:#1a1a2e;color:#eee;padding:20px}h1{color:#e94560}.card{background:rgba(255,255,255,0.05);padding:20px;margin:10px 0;border-radius:10px}button{padding:12px 24px;margin:5px;border:none;border-radius:5px;cursor:pointer}.btn-stealth{background:#667eea;color:#fff}.btn-attack{background:#f5576c;color:#fff}</style></head>
-<body><h1>🛡️ KaliDefender Dashboard</h1>
-<div class="card"><h3>Modo Actual: <span id="mode">Cargando...</span></div>
-<div class="card"><button class="btn-stealth" onclick="setMode('stealth')">🥷 Stealth</button><button class="btn-attack" onclick="setMode('attack')">⚔️ Attack</button><button onclick="update()">🔄 Refresh</button></div>
-<script>async function update(){const r=await fetch('/api/status');const d=await r.json();document.getElementById('mode').innerText=d.mode.toUpperCase()}async function setMode(a){await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:a})});setTimeout(update,1000)}setInterval(update,5000);update();</script></body></html>
-HTMLEOF
-    
-    log "✅ Dashboard en https://0.0.0.0:$DASHBOARD_PORT"
-    echo "📌 Inicia: sudo kalidefender.sh dashboard-start"
+    echo "📦 Backups disponibles:"
+    ls -1 "$BACKUP_DIR" | sort -u | while read -r backup; do
+        echo "  - $backup"
+    done
 }
+
+# ==================== MÓDULO DE INSTALACIÓN ====================
+
+install_kalidefender() {
+    log "INFO" "🚀 Instalando KaliDefender v${KALI_VERSION}..."
+    
+    # Verificar sistema
+    check_dependency "apt" "apt"
+    check_dependency "iptables" "iptables"
+    check_dependency "systemctl" "systemd"
+    
+    # Crear estructura de directorios
+    mkdir -p "$STATE_DIR" "$BACKUP_DIR" "$CONFIG_DIR"
+    touch "$LOG_FILE"
+    chmod 640 "$LOG_FILE"
+    
+    # Instalar dependencias
+    log "INFO" "Instalando dependencias..."
+    apt update -qq
+    apt install -y -qq \
+        iptables-persistent \
+        fail2ban \
+        tor \
+        tor-geoipdb \
+        apparmor \
+        apparmor-utils \
+        curl \
+        wireguard \
+        python3 \
+        python3-pip || {
+        log "ERROR" "Error instalando dependencias"
+        return 1
+    }
+    
+    # Configurar servicios
+    configure_tor_transproxy
+    configure_fail2ban
+    install_apparmor_profiles
+    
+    # Copiar script al sistema
+    cp "$0" /usr/local/bin/kalidefender
+    chmod +x /usr/local/bin/kalidefender
+    
+    # Crear servicio systemd
+    cat > /etc/systemd/system/kalidefender.service << EOF
+[Unit]
+Description=KaliDefender v${KALI_VERSION} - Sistema de Perfilado de Red
+After=network.target tor.service
+Wants=tor.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/kalidefender start
+RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    
+    systemctl daemon-reload
+    systemctl enable kalidefender.service
+    
+    # Activar modo stealth por defecto
+    mode_stealth
+    
+    log "INFO" "✅ KaliDefender v${KALI_VERSION} instalado correctamente"
+    echo ""
+    echo "📌 KaliDefender está funcionando en Modo Stealth"
+    echo "📌 Comandos disponibles:"
+    echo "   sudo kalidefender stealth    - Modo privacidad total"
+    echo "   sudo kalidefender attack     - Modo pentesting"
+    echo "   sudo kalidefender status     - Ver estado actual"
+    echo "   sudo kalidefender help       - Ayuda completa"
+}
+
+# ==================== MÓDULO DE ESTADO ====================
+
+show_status() {
+    local mode
+    mode=$(get_state "mode")
+    local c2_provider
+    c2_provider=$(get_state "c2_provider")
+    
+    echo "📊 ESTADO DE KALIDEFENDER v${KALI_VERSION}"
+    echo "=========================================="
+    echo "🔷 Modo: ${mode^^}"
+    echo "🌐 Red C2: ${c2_provider:-No detectada}"
+    echo ""
+    echo "🔌 Puertos abiertos:"
+    iptables -L KALIDEFENDER-IN -n --line-numbers 2>/dev/null | grep ACCEPT || echo "  Ninguno"
+    echo ""
+    echo "🛡️ Servicios:"
+    echo "  Tor: $(systemctl is-active tor)"
+    echo "  Fail2Ban: $(systemctl is-active fail2ban)"
+    echo "=========================================="
+}
+
+# ==================== SISTEMA DE BACKUP ====================
+
+create_backup() {
+    local backup_name="kalidefender_backup_$(date +%Y%m%d_%H%M%S)"
+    local backup_path="${BACKUP_DIR}/${backup_name}"
+    
+    mkdir -p "$backup_path"
+    
+    # Backup de reglas iptables
+    iptables-save > "${backup_path}/iptables.rules" 2>/dev/null
+    ip6tables-save > "${backup_path}/ip6tables.rules" 2>/dev/null
+    
+    # Backup de estado
+    cp -r "$STATE_DIR" "${backup_path}/state"
+    
+    # Backup de configuración
+    cp /etc/resolv.conf "${backup_path}/resolv.conf" 2>/dev/null
+    cp /etc/tor/torrc "${backup_path}/torrc" 2>/dev/null
+    
+    log "INFO" "✅ Backup creado: $backup_name"
+    echo "$backup_name"
+}
+
+restore_backup() {
+    local backup_name="$1"
+    local backup_path="${BACKUP_DIR}/${backup_name}"
+    
+    if [[ ! -d "$backup_path" ]]; then
+        log "ERROR" "Backup '$backup_name' no encontrado"
+        return 1
+    fi
+    
+    log "INFO" "🔄 Restaurando backup: $backup_name"
+    
+    # Restaurar iptables
+    [[ -f "${backup_path}/iptables.rules" ]] && iptables-restore < "${backup_path}/iptables.rules"
+    [[ -f "${backup_path}/ip6tables.rules" ]] && ip6tables-restore < "${backup_path}/ip6tables.rules"
+    
+    # Restaurar estado
+    [[ -d "${backup_path}/state" ]] && cp -r "${backup_path}/state"/* "$STATE_DIR"
+    
+    # Restaurar configuraciones
+    [[ -f "${backup_path}/resolv.conf" ]] && cp "${backup_path}/resolv.conf" /etc/resolv.conf
+    [[ -f "${backup_path}/torrc" ]] && cp "${backup_path}/torrc" /etc/tor/torrc && systemctl restart tor
+    
+    log "INFO" "✅ Backup restaurado correctamente"
+}
+
+# ==================== DASHBOARD WEB SEGURO ====================
 
 start_dashboard() {
-    [[ ! -f "$CONFIG_DIR/dashboard/server.py" ]] && { log "❌ Ejecuta: sudo kalidefender.sh dashboard-setup"; return 1; }
-    pkill -f "dashboard/server.py" 2>/dev/null || true
-    cd "$CONFIG_DIR/dashboard" && DASHBOARD_PORT="$DASHBOARD_PORT" nohup python3 server.py > /var/log/kalidefender-dashboard.log 2>&1 &
-    log "✅ Dashboard: https://0.0.0.0:$DASHBOARD_PORT"
+    log "INFO" "Iniciando dashboard web seguro..."
+    
+    # Generar token de autenticación si no existe
+    if [[ -z "$DASHBOARD_AUTH_TOKEN" ]]; then
+        DASHBOARD_AUTH_TOKEN=$(openssl rand -hex 32)
+        log "INFO" "Token de autenticación generado: $DASHBOARD_AUTH_TOKEN"
+        echo "⚠️ GUARDA ESTE TOKEN: $DASHBOARD_AUTH_TOKEN"
+    fi
+    
+    # Iniciar servidor Python seguro
+    cat > /tmp/kalidefender_dashboard.py << PYEOF
+import http.server
+import ssl
+import json
+import subprocess
+import os
+import hashlib
+from datetime import datetime
+
+PORT = int(os.environ.get('DASHBOARD_PORT', 8443))
+AUTH_TOKEN = os.environ.get('DASHBOARD_AUTH_TOKEN', '')
+
+class SecureHandler(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/api/status':
+            if not self.verify_auth():
+                self.send_error(401)
+                return
+            self.send_json_response(self.get_status())
+        else:
+            self.send_error(404)
+    
+    def do_POST(self):
+        if self.path == '/api/action':
+            if not self.verify_auth():
+                self.send_error(401)
+                return
+            
+            content_length = int(self.headers.get('Content-Length', 0))
+            if content_length == 0:
+                self.send_error(400)
+                return
+            
+            data = json.loads(self.rfile.read(content_length))
+            action = data.get('action', '')
+            
+            # Whitelist de acciones permitidas
+            allowed_actions = ['stealth', 'attack', 'status']
+            if action not in allowed_actions:
+                self.send_error(400, "Acción no permitida")
+                return
+            
+            result = self.execute_action(action)
+            self.send_json_response(result)
+        else:
+            self.send_error(404)
+    
+    def verify_auth(self):
+        auth_header = self.headers.get('Authorization', '')
+        if not auth_header.startswith('Bearer '):
+            return False
+        token = auth_header.split(' ')[1]
+        return hashlib.sha256(token.encode()).hexdigest() == hashlib.sha256(AUTH_TOKEN.encode()).hexdigest()
+    
+    def get_status(self):
+        return {
+            'version': '${KALI_VERSION}',
+            'timestamp': datetime.now().isoformat(),
+            'mode': open('/etc/kalidefender/state/mode').read().strip() if os.path.exists('/etc/kalidefender/state/mode') else 'unknown',
+            'uptime': subprocess.getoutput('uptime -p')
+        }
+    
+    def execute_action(self, action):
+        try:
+            result = subprocess.run(
+                ['sudo', '/usr/local/bin/kalidefender', action],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            return {
+                'success': True,
+                'output': result.stdout,
+                'action': action
+            }
+        except Exception as e:
+            return {
+                'success': False,
+                'error': str(e),
+                'action': action
+            }
+    
+    def send_json_response(self, data):
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Cache-Control', 'no-cache')
+        self.send_header('X-Content-Type-Options', 'nosniff')
+        self.end_headers()
+        self.wfile.write(json.dumps(data).encode())
+
+def main():
+    # Generar certificado autofirmado
+    cert_dir = '/etc/kalidefender/certs'
+    os.makedirs(cert_dir, exist_ok=True)
+    
+    cert_file = os.path.join(cert_dir, 'dashboard.pem')
+    key_file = os.path.join(cert_dir, 'dashboard.key')
+    
+    if not os.path.exists(cert_file):
+        subprocess.run([
+            'openssl', 'req', '-x509', '-newkey', 'rsa:4096',
+            '-keyout', key_file, '-out', cert_file,
+            '-days', '365', '-nodes',
+            '-subj', '/CN=KaliDefender Dashboard'
+        ], check=True)
+    
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(cert_file, key_file)
+    
+    server = http.server.HTTPServer(('127.0.0.1', PORT), SecureHandler)
+    server.socket = context.wrap_socket(server.socket, server_side=True)
+    
+    print(f"Dashboard seguro iniciado en https://localhost:{PORT}")
+    print(f"Token: {AUTH_TOKEN}")
+    
+    server.serve_forever()
+
+if __name__ == '__main__':
+    main()
+PYEOF
+    
+    # Iniciar dashboard en background
+    nohup python3 /tmp/kalidefender_dashboard.py > /var/log/kalidefender-dashboard.log 2>&1 &
+    local pid=$!
+    
+    sleep 2
+    
+    if kill -0 $pid 2>/dev/null; then
+        log "INFO" "Dashboard iniciado en https://localhost:${DASHBOARD_PORT}"
+        echo "📊 Dashboard: https://localhost:${DASHBOARD_PORT}"
+        echo "🔑 Token: $DASHBOARD_AUTH_TOKEN"
+        echo "📌 Usa: curl -H 'Authorization: Bearer $DASHBOARD_AUTH_TOKEN' https://localhost:${DASHBOARD_PORT}/api/status"
+    else
+        log "ERROR" "No se pudo iniciar el dashboard"
+        return 1
+    fi
 }
 
-stop_dashboard() {
-    pkill -f "dashboard/server.py" 2>/dev/null || true
-    log "✅ Dashboard detenido"
+# ==================== MAIN ====================
+
+main() {
+    # Verificar root inmediatamente
+    check_root
+    
+    case "${1:-help}" in
+        install)
+            install_kalidefender
+            ;;
+        stealth)
+            mode_stealth
+            ;;
+        attack)
+            mode_attack
+            ;;
+        toggle)
+            local current_mode
+            current_mode=$(get_state "mode")
+            if [[ "$current_mode" == "stealth" ]]; then
+                mode_attack
+            else
+                mode_stealth
+            fi
+            ;;
+        status)
+            show_status
+            ;;
+        backup)
+            create_backup
+            ;;
+        restore)
+            if [[ -z "${2:-}" ]]; then
+                echo "❌ Error: Especifica el nombre del backup"
+                exit 1
+            fi
+            restore_backup "$2"
+            ;;
+        dashboard)
+            start_dashboard
+            ;;
+        wg-server)    setup_wireguard_server ;;
+        wg-add-client) add_wireguard_client "${2:-}" ;;
+        wg-list)      list_wireguard_clients ;;
+        cobalt-strike) setup_cobalt_strike ;;
+        interfaces)   list_network_interfaces ;;
+        randomize-mac) randomize_mac_address "${2:-}" ;;
+        interface-priority) configure_interface_priority ;;
+        list-backups) list_backups ;;
+        apparmor)     install_apparmor_profiles ;;
+        help|--help|-h)
+            cat << 'EOF'
+KaliDefender v6.0.0 - Sistema de Perfilado de Red para Pentesters
+
+USO:
+  sudo kalidefender [COMANDO] [OPCIONES]
+
+COMANDOS:
+  install       Instala y configura KaliDefender
+  stealth       Activa el Modo Stealth (privacidad total con Tor)
+  attack        Activa el Modo Attack (pentesting con C2 seguro)
+  toggle        Alterna entre modos Stealth y Attack
+  status        Muestra el estado actual
+  backup        Crea un backup de la configuración actual
+  restore NAME  Restaura configuración desde un backup
+  dashboard     Inicia el dashboard web seguro
+  wg-server     Configura el servidor WireGuard
+  wg-add-client Agrega un cliente WireGuard
+  wg-list       Lista los clientes WireGuard
+  cobalt-strike Configura integración con Cobalt Strike
+  interfaces    Lista las interfaces de red
+  randomize-mac Aleatoriza la MAC de una interfaz
+  list-backups  Lista todos los backups disponibles
+  apparmor      Instala perfiles de AppArmor
+  help          Muestra este mensaje de ayuda
+
+VARIABLES DE ENTORNO:
+  KALIDEFENDER_TCP_PORTS      Puertos TCP en modo Attack (default: 22,80,443,4444,5555,8080)
+  KALIDEFENDER_UDP_PORTS      Puertos UDP en modo Attack (default: 53,1194)
+  KALIDEFENDER_BANTIME        Tiempo de baneo Fail2Ban (default: 24h)
+  KALIDEFENDER_MAXRETRY       Intentos máximos Fail2Ban (default: 3)
+  KALIDEFENDER_DASHBOARD_PORT Puerto dashboard (default: 8443)
+  KALIDEFENDER_AUTH_TOKEN     Token autenticación dashboard
+
+EJEMPLOS:
+  sudo kalidefender install
+  sudo kalidefender stealth
+  sudo KALIDEFENDER_TCP_PORTS="22,443,1337" kalidefender attack
+  sudo kalidefender dashboard
+EOF
+            ;;
+        *)
+            echo "❌ Comando no válido: $1"
+            echo "Usa 'sudo kalidefender help' para ver los comandos disponibles"
+            exit 1
+            ;;
+    esac
 }
+
+# Ejecutar main
+main "$@"

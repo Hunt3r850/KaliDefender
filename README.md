@@ -14,7 +14,7 @@
 
 ---
 
-# 📌 Overview
+## 📌 Overview
 
 KaliDefender is a hardened network orchestration framework for offensive security operations on Kali Linux.
 
@@ -22,26 +22,30 @@ It allows operators to instantly switch between two completely isolated network 
 
 | Mode | Purpose |
 |---|---|
-| 🥷 Stealth | Anonymous reconnaissance & OSINT |
-| ⚔️ Attack | Active pentesting & C2 operations |
+| 🥷 Stealth | Anonymous reconnaissance & OSINT (Tor TransProxy) |
+| ⚔️ Attack | Active pentesting & C2 operations (Tailscale/ZeroTier) |
 
 ---
 
-# ✨ Features
+## ✨ Features
 
-- Full Tor TransProxy routing
-- DNS through Tor
-- Atomic iptables deployment
-- Tailscale & ZeroTier detection
-- Fail2Ban integration
-- Hardened HTTPS dashboard
-- Backup & restore system
-- AppArmor integration
-- Structured JSON logging
+- **Modular Architecture:** Fully restructured code into independent modules.
+- **Secure Web Dashboard:** REST API with Bearer Token authentication and HTTPS.
+- **Atomic Firewall:** Instant rule application using `iptables-restore`.
+- **Full Tor TransProxy Routing:** Complete traffic anonymization.
+- **DNS through Tor:** Secure and immutable DNS configuration.
+- **Tailscale & ZeroTier Detection:** Automatic C2 network detection and split-tunneling.
+- **Fail2Ban Integration:** Adaptive banning for SSH, HTTP, and HTTPS.
+- **AppArmor Integration:** Hardened profiles for Metasploit, Nmap, and BurpSuite.
+- **WireGuard Server/Client:** Built-in VPN management.
+- **Cobalt Strike Integration:** Hardening, Malleable C2 profiles, and redirectors.
+- **Multi-Interface Support:** MAC randomization and interface priority management.
+- **Backup & Restore System:** Complete system state backup and restoration.
+- **Structured JSON Logging:** Ready for SIEM integration.
 
 ---
 
-# 📁 Repository Structure
+## 📁 Repository Structure
 
 ```text
 KaliDefender/
@@ -53,12 +57,13 @@ KaliDefender/
 ├── LICENSE
 ├── kalidefender.sh
 ├── kalidefender_uninstall.sh
-└── hybrid_net_manager.py
+├── hybrid_net_manager.py
+└── defaults.conf
 ```
 
 ---
 
-# 🚀 Installation
+## 🚀 Installation
 
 ```bash
 git clone https://github.com/Hunt3r850/KaliDefender.git
@@ -69,31 +74,36 @@ sudo ./kalidefender.sh install
 
 ---
 
-# ⚡ Quick Commands
+## ⚡ Quick Commands
 
 ```bash
-sudo kalidefender status
 sudo kalidefender stealth
 sudo kalidefender attack
-sudo kalidefender backup
+sudo kalidefender toggle
+sudo kalidefender status
 sudo kalidefender dashboard
+sudo kalidefender backup
+sudo kalidefender restore <backup_name>
+sudo kalidefender wg-server
+sudo kalidefender cobalt-strike
+sudo kalidefender randomize-mac eth0
 ```
 
 ---
 
-# 🔐 Security Philosophy
+## 🔐 Security Philosophy
 
 KaliDefender follows:
 
-- Modularity
-- Atomicity
-- Idempotence
-- Fail-Safe Design
-- Traceability
+- **Modularity:** Independent components for firewall, modes, C2, and security.
+- **Atomicity:** Firewall rules are applied atomically to prevent lockouts.
+- **Idempotence:** Commands can be run multiple times safely.
+- **Fail-Safe Design:** Strict error handling and dependency checking.
+- **Traceability:** Structured logging for all actions.
 
 ---
 
-# 🛣️ Roadmap
+## 🛣️ Roadmap
 
 - nftables support
 - Sliver integration
@@ -105,7 +115,7 @@ KaliDefender follows:
 
 ---
 
-# 📄 License
+## 📄 License
 
 MIT License
 
@@ -115,19 +125,16 @@ The above copyright notice and this permission notice shall be included in all c
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-⚠️ Aviso de Responsabilidad KaliDefender es una herramienta diseñada exclusivamente para:
+⚠️ **Aviso de Responsabilidad:** KaliDefender es una herramienta diseñada exclusivamente para:
 
 ✅ Profesionales de seguridad autorizados
-
 ✅ Pentesters con autorización explícita por escrito
-
 ✅ Investigadores de seguridad en entornos controlados
-
 ✅ Uso educativo
 
 ---
 
-# ⚠️ Disclaimer
+## ⚠️ Disclaimer
 
 This project is intended strictly for authorized security testing, research, and educational environments.
 
@@ -135,6 +142,6 @@ Unauthorized usage is the sole responsibility of the operator.
 
 ---
 
-# 👤 Author
+## 👤 Author
 
 Hunt3r850 && AHByte
