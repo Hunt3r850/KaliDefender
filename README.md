@@ -193,18 +193,21 @@ KaliDefender/
 
 ### Instalación Rápida (3 Pasos)
 
-``bash
 # 1. Clonar el repositorio
 git clone https://github.com/Hunt3r850/KaliDefender.git
+
 cd KaliDefender
 
 # 2. Dar permisos de ejecución a los scripts
+
 chmod +x *.sh
 
 # 3. Instalar (requiere sudo)
+
 sudo ./kalidefender.sh install
 
 ¡Listo! KaliDefender está activo en Modo Stealth por defecto.
+
 
 ¿Qué hace la instalación?
 
@@ -225,6 +228,7 @@ sudo ./kalidefender.sh install
 ✅ Activa el Modo Stealth por defecto
 
 ✅ Copia el ejecutable a /usr/local/bin/kalidefender
+
 
 Instalación Personalizada con Variables de Entorno
 
@@ -333,36 +337,8 @@ Pasos para reproducir el error
 
 - Modo "Entrenamiento" para simular entornos de práctica
 
-Guías de Estilo
-
-# Nombres de funciones: snake_case
-mi_funcion_ejemplo() {
-    local variable_local="valor"
-    echo "$variable_local"
-}
-
-# Variables globales: UPPER_CASE
-readonly CONFIG_DIR="/etc/miapp"
-
-# Comentarios: Explicar el "por qué", no el "qué"
-# Mal: iptables -F  # Borrar reglas
-# Bien: iptables -F  # Limpiar reglas previas para evitar conflictos con cambios anteriores
 
 
-Python (Dashboard)
-
-def secure_endpoint():
-    """
-    Endpoint seguro con validación de entrada.
-    
-    Returns:
-        dict: Respuesta JSON con estado de la operación
-    """
-    # Whitelist de acciones permitidas
-    allowed = ['stealth', 'attack', 'status']
-    
-    if action not in allowed:
-        return {'error': 'Acción no permitida'}, 403
 
 
 
