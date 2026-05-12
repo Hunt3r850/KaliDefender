@@ -104,36 +104,63 @@ En operaciones de seguridad ofensiva, el contexto es crítico. Necesitas dos per
 ### Estructura de Archivos del Proyecto
 
 KaliDefender/
+
 ├── README.md # Documentación principal
+
 ├── CHANGELOG.md # Historial de cambios
+
 ├── GUIDE.md # Guía de uso detallada
+
 ├── INSTALL.md # Instrucciones de instalación
+
 ├── UNINSTALL.md # Desinstalación completa
+
 ├── LICENSE # Licencia MIT
+
 ├── kalidefender.sh # Script principal (CLI)
+
 ├── kalidefender_uninstall.sh # Script de desinstalación
+
 └── hybrid_net_manager.py # Dashboard web (Python)
 
 ###  Estructura en el Sistema
 
 /etc/kalidefender/ # Directorio principal de configuración
+
 ├── config/
+
 │ └── defaults.conf # Configuración centralizada
+
 ├── state/ # Estado del sistema en tiempo real
+
 │ ├── mode # Modo actual (stealth/attack)
+
 │ ├── c2_provider # Proveedor C2 detectado
+
 │ └── c2_subnet # Subred C2
+
 ├── backups/ # Backups del sistema
+
 │ └── kalidefender_backup_YYYYMMDD_HHMMSS/
+
 │ ├── iptables.rules
+
 │ ├── ip6tables.rules
+
 │ ├── state/
+
 │ ├── resolv.conf
+
 │ └── torrc
+
 ├── certs/ # Certificados SSL para dashboard
+
 │ ├── dashboard.pem
+
 │ └── dashboard.key
+
 └── logs/
+
 └── kalidefender.log # Log estructurado del sistema
 
 /usr/local/bin/kalidefender # Ejecutable principal
@@ -146,20 +173,31 @@ KaliDefender/
 ┌─────────────────────────────────────────────────────────────┐
 │ KALIDEFENDER v6.0.0 │
 └─────────────────────────────────────────────────────────────┘
+
 │
+
 ┌─────────┴─────────┐
 │ ¿Modo Actual? │
 └─────────┬─────────┘
+
 │
+
 ┌───────────────┴───────────────┐
+
 │ │
+
 ┌─────▼─────┐ ┌─────▼─────┐
 │ STEALTH │ │ ATTACK │
 └─────┬─────┘ └─────┬─────┘
+
 │ │
+
 ┌─────────┼─────────┐ ┌─────────┼─────────┐
+
 │ │ │ │ │ │
+
 ▼ ▼ ▼ ▼ ▼ ▼
+
 Tor Firewall DNS Firewall C2 Puertos
 Proxy DROP Seguro Selectivo Detect Abiertos
 
