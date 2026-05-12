@@ -104,23 +104,23 @@ En operaciones de seguridad ofensiva, el contexto es crítico. Necesitas dos per
 ### Estructura de Archivos del Proyecto
 
 KaliDefender/
-
+|
 ├── README.md # Documentación principal
-
+|
 ├── CHANGELOG.md # Historial de cambios
-
+|
 ├── GUIDE.md # Guía de uso detallada
-
+|
 ├── INSTALL.md # Instrucciones de instalación
-
+|
 ├── UNINSTALL.md # Desinstalación completa
-
+|
 ├── LICENSE # Licencia MIT
-
+|
 ├── kalidefender.sh # Script principal (CLI)
-
+|
 ├── kalidefender_uninstall.sh # Script de desinstalación
-
+|
 └── hybrid_net_manager.py # Dashboard web (Python)
 
 ###  Estructura en el Sistema
@@ -168,38 +168,6 @@ KaliDefender/
 /etc/systemd/system/
 └── kalidefender.service # Servicio systemd para auto-inicio
 
-### Diagrama de Flujo de Modos
-
-┌─────────────────────────────────────────────────────────────┐
-│ KALIDEFENDER v6.0.0 │
-└─────────────────────────────────────────────────────────────┘
-
-│
-
-┌─────────┴─────────┐
-│ ¿Modo Actual? │
-└─────────┬─────────┘
-
-│
-
-┌───────────────┴───────────────┐
-
-│ │
-
-┌─────▼─────┐ ┌─────▼─────┐
-│ STEALTH │ │ ATTACK │
-└─────┬─────┘ └─────┬─────┘
-
-│ │
-
-┌─────────┼─────────┐ ┌─────────┼─────────┐
-
-│ │ │ │ │ │
-
-▼ ▼ ▼ ▼ ▼ ▼
-
-Tor Firewall DNS Firewall C2 Puertos
-Proxy DROP Seguro Selectivo Detect Abiertos
 
 ### Principios de Diseño
 
@@ -238,6 +206,7 @@ sudo ./kalidefender.sh install
 ¡Listo! KaliDefender está activo en Modo Stealth por defecto.
 
 ¿Qué hace la instalación?
+
 ✅ Verifica que el sistema sea compatible (Kali Linux, dependencias)
 
 ✅ Instala todas las dependencias necesarias (Tor, Fail2Ban, AppArmor, etc.)
@@ -256,3 +225,37 @@ sudo ./kalidefender.sh install
 
 ✅ Copia el ejecutable a /usr/local/bin/kalidefender
 
+Instalación Personalizada con Variables de Entorno
+
+# Personalizar puertos de ataque
+export KALIDEFENDER_TCP_PORTS="22,443,1337,4444,8080"
+export KALIDEFENDER_UDP_PORTS="53,1194,51820"
+
+# Personalizar Fail2Ban (más agresivo)
+export KALIDEFENDER_BANTIME="48h"
+export KALIDEFENDER_MAXRETRY="5"
+
+# Dashboard en puerto estándar
+export KALIDEFENDER_DASHBOARD_PORT="443"
+export KALIDEFENDER_AUTH_TOKEN="mi-token-seguro-2024"
+
+# Logs en JSON para integración SIEM
+export KALIDEFENDER_LOG_FORMAT="json"
+
+# Instalar con configuración personalizada
+sudo -E ./kalidefender.sh install
+
+Verificar Instalación
+
+# Verificar que el ejecutable existe
+which kalidefender
+# Output: /usr/local/bin/kalidefender
+
+# Verificar que el servicio está activo
+systemctl status kalidefender
+
+# Verificar el modo actual
+sudo kalidefender status
+
+# Verificar logs en tiempo real
+tail -f /var/log/kalidefender.log
